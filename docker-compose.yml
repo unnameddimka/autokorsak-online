@@ -2,9 +2,10 @@ services:
   app:
     build: .
     image: autokorsak-online:local
-    # Local-only prototype without authentication: never bind to a public interface.
+    # Local-only prototype without authentication: bound to 127.0.0.1 by default. AUTOKORSAK_BIND=0.0.0.0
+    # (e.g. in a git-ignored .env) opens it to the local network; never expose it to the internet.
     ports:
-      - "127.0.0.1:${AUTOKORSAK_PORT:-8080}:8080"
+      - "${AUTOKORSAK_BIND:-127.0.0.1}:${AUTOKORSAK_PORT:-8080}:8080"
     volumes:
       - autokorsak-data:/data
     restart: unless-stopped

@@ -35,6 +35,12 @@ docker compose down                 # remove the container, keep data
 docker compose down -v              # remove the container AND all data (tournaments, catalog)
 ```
 
+**Local network access (optional).** By default the app listens only on `127.0.0.1`. To let other devices on your
+LAN open it, put `AUTOKORSAK_BIND=0.0.0.0` in a `.env` file next to `docker-compose.yml` (the file is git-ignored),
+run `docker compose up -d`, and allow inbound TCP 8080 from the local subnet in the firewall. On Windows, also make
+sure the network is classified as *Private*: Docker Desktop blocks its backend on Public networks. There is still no
+authentication: anyone on the LAN can edit and delete data, so use this only on a trusted network.
+
 Data is stored in SQLite inside the `autokorsak-data` Docker volume and survives restarts and rebuilds.
 
 ## Demo with the reference tournament

@@ -13,3 +13,6 @@ data/
 *.db
 *.db-shm
 *.db-wal
+
+# Machine-specific compose settings (e.g. AUTOKORSAK_BIND)
+.env

@@ -42,6 +42,7 @@ behavior require a new numbered spec.
 | I21 | Legacy byes have board number 0. Board 0 is accepted for byes only and is excluded from the board-uniqueness check. | Fixtures store byes without a board, so they must stay editable. |
 | I22 | `skippedRoundsNotAdjusted` is reported for a counted round when a final player is **explicitly absent** (`NotPlayingRounds`), whether or not results exist. It is also reported when an available final player has no game in a round that is being played (at least one game has a result). Available but unpaired players in an empty or unplayed round raise nothing (the round is awaiting pairings), and rounds excluded from calculation raise nothing. | Review P2-01 and re-review of `bfe922c8`. |
 | I23 | `NotPlayingInRound` values that are malformed, out of range, or repeated make the import fail (`xml.invalidValue`) instead of being dropped. | Review P2-04: never lose supported data silently. |
+| I24 | The bind address is configurable (`AUTOKORSAK_BIND`, default `127.0.0.1`). LAN exposure is an explicit, machine-local opt-in through a git-ignored `.env`. | The owner asked for LAN access to the demo machine (2026-10-16); the repository default stays local-only as spec 0000 §8 requires. |
 
 ## Open questions (for the referee / owner)
 
