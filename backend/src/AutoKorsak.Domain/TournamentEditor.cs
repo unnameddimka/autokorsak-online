@@ -36,7 +36,11 @@ public sealed record ParticipantInput(
     List<int>? NotPlayingRounds,
     string? Comment,
     Guid? CatalogEntryId = null,
-    int? FirstEligibleRound = null);
+    int? FirstEligibleRound = null,
+    /// <summary>Draft round-robin starting number: null = unchanged, 0 = clear, positive = set (spec 0002 §2).</summary>
+    int? StartingNumber = null);
+
+public sealed record StartingNumberEntry(int ParticipantId, int? Number);
 
 public sealed record PairingInput(
     int? BlackId,
@@ -208,6 +212,13 @@ public static partial class TournamentEditor
             ?? UnadjustedJoinRound(t)
             ?? throw new DomainException("participant.joinRoundRequired", Args(("max", t.NumberOfRounds)));
         ValidateParticipation(t, p, isNew, joinRound, input.Preliminary);
+        int? draftNumber = p.StartingNumber;
+        if (input.StartingNumber is { } requestedNumber)
+        {
+            draftNumber = requestedNumber == 0 ? null : requestedNumber;
+            if (draftNumber != p.StartingNumber)
+                CheckDraftEditable(t, string.Join(' ', input.LocalSurname, input.LocalFirstName).Trim(), input.Preliminary, joinRound, draftNumber);
+        }
 
         if (!isNew)
         {
@@ -243,6 +254,7 @@ public static partial class TournamentEditor
         p.Coach = Clean(input.Coach, "coach");
         p.Preliminary = input.Preliminary;
         p.FirstEligibleRound = joinRound;
+        p.StartingNumber = draftNumber;
         p.NotPlayingRounds = notPlaying;
         p.Comment = Clean(input.Comment, "comment", MaxTextLength);
     }
@@ -283,6 +295,40 @@ public static partial class TournamentEditor
         }
         return new FinalizeResult(finalized, skipped);
     }
+
+    // ---------- draft starting numbers (spec 0002 §2) ----------
+
+    /// <summary>
+    /// Saves draft starting numbers for several participants at once; all entries are validated before any is
+    /// applied. Partial and temporarily duplicated drafts are allowed: the sequence is validated at generation.
+    /// </summary>
+    public static int SetStartingNumbers(Tournament t, IReadOnlyList<StartingNumberEntry> entries)
+    {
+        var resolved = new List<(Participant Participant, int? Number)>();
+        foreach (var e in entries)
+        {
+            var p = t.FindParticipant(e.ParticipantId) ?? throw new NotFoundException("participant.notFound");
+            var number = e.Number is 0 ? null : e.Number;
+            if (number == p.StartingNumber) continue;
+            CheckDraftEditable(t, p.DisplayName, p.Preliminary, p.FirstEligibleRound, number);
+            resolved.Add((p, number));
+        }
+        foreach (var (p, number) in resolved) p.StartingNumber = number;
+        return resolved.Count;
+    }
+
+    /// <summary>Identical rules for the player card and the Pairings table.</summary>
+    private static void CheckDraftEditable(Tournament t, string name, bool preliminary, int joinRound, int? number)
+    {
+        var stage = PairingSchedule.RoundRobinStage(t) ?? throw new DomainException("startingNumbers.noRoundRobin");
+        if (stage.IsFrozen) throw DomainException.Conflict("startingNumbers.frozen");
+        if (preliminary || joinRound > stage.StartRound)
+            throw DomainException.Conflict("startingNumbers.ineligible", Args(("name", name)));
+        if (number is < 1 or > MaxStartingNumber)
+            throw new DomainException("startingNumbers.invalidValue", Args(("value", number), ("max", MaxStartingNumber)));
+    }
+
+    public const int MaxStartingNumber = 999;
 
     // ---------- joining round and round-robin roster rules (spec 0001 §2.2–2.4) ----------
 

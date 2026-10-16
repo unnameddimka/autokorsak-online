@@ -1,6 +1,6 @@
 # 0002 — Round-Robin Starting Numbers, Round-Count Adjustment, and Draw Reset
 
-**Status: Proposed — awaiting owner approval**  
+**Status: Approved** (by the owner, 2026-10-16)  
 **Date:** 2026-10-16  
 **Depends on:** Accepted spec 0001 and the owner's follow-up decisions on 2026-10-16.  
 **Amended:** 2026-10-16 — four owner-approved clarifications: one-stage Settings recovery after Clear, retained inactive-player drafts, editable batch table, and ordered confirmations.  

@@ -276,3 +276,14 @@ tr.row-muted td { color: var(--muted); }
 .standings-toolbar .standings-caption { margin: 0; }
 .prep-mode th, .prep-mode td.strong { background: #fbf6ec; }
 td.strong { font-weight: 600; }
+
+/* ---------- round-robin starting numbers (spec 0002) ---------- */
+
+.rr-panel { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.8rem; }
+.rr-panel .starting-numbers { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.6rem 0.9rem; }
+.rr-panel .starting-numbers summary { color: var(--text); font-weight: 600; }
+.data-table.compact { box-shadow: none; margin-top: 0.5rem; }
+.data-table.compact th, .data-table.compact td { padding: 0.3rem 0.6rem; }
+.number-input { width: 4.5rem; text-align: right; }
+tr.row-error td { background: var(--danger-soft); }
+tr.row-error .number-input { border-color: var(--danger); }

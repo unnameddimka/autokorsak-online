@@ -180,16 +180,16 @@ public class ApiTests : IDisposable
         for (var i = 1; i <= 4; i++)
             await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
 
-        // 7 rounds for 4 players: generating needs a later stage first.
-        var mismatch = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true }, Json);
-        Assert.Equal("generate.roundCountMismatch", await ErrorCode(mismatch));
+        // 7 rounds for 4 players: a terminal round robin needs 3 rounds, so the server asks to adjust (spec 0002 §4).
+        var mismatch = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true, source = "random" }, Json);
+        Assert.Equal("generate.roundCountAdjustment", await ErrorCode(mismatch));
 
         var staged = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/stages", new { startRound = 4, system = "swiss" }, Json));
         Assert.Equal("swiss", staged["tournament"]!["system"]!.GetValue<string>());
         Assert.True(staged["systemLocked"]!.GetValue<bool>());
 
         var generated = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/2/generate",
-            new { allRounds = true, randomStartingNumbers = true }, Json));
+            new { allRounds = true, source = "random" }, Json));
         Assert.Equal(6, generated["result"]!["created"]!.GetValue<int>());
         var stage = generated["tournament"]!["stages"]![0]!;
         Assert.True(stage["randomStartingNumbers"]!.GetValue<bool>());
@@ -213,7 +213,7 @@ public class ApiTests : IDisposable
         var id = created["tournament"]!["id"]!.GetValue<string>();
         for (var i = 1; i <= 4; i++)
             await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
-        await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { }, Json));
+        await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { source = "random" }, Json));
 
         var response = await client.PutAsJsonAsync($"/api/tournaments/{id}/participants/2",
             LegacyXmlTests.Player("Гравець 2") with { NotPlayingRounds = [2] }, Json);
@@ -252,6 +252,57 @@ public class ApiTests : IDisposable
         var change = await client.PutAsJsonAsync($"/api/tournaments/{t.Id}/settings",
             LegacyXmlTests.Settings("Старий турнір", TournamentSystem.McMahon), Json);
         Assert.Equal("settings.systemLocked", await ErrorCode(change));
+    }
+
+    [Fact]
+    public async Task Starting_numbers_round_count_confirmation_clear_and_result_lock_endpoints()
+    {
+        var client = _factory.Client();
+        var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin, 5), Json));
+        var id = created["tournament"]!["id"]!.GetValue<string>();
+        for (var i = 1; i <= 4; i++)
+            await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
+
+        var saved = await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/starting-numbers", new
+        {
+            entries = new[] { new { participantId = 1, number = 2 }, new { participantId = 2, number = 1 }, new { participantId = 3, number = 3 }, new { participantId = 4, number = 4 } },
+        }, Json));
+        Assert.Equal(2, saved["roundRobin"]!["numbers"]!["1"]!.GetValue<int>());
+
+        var prompt = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true, source = "entered" }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, prompt.StatusCode);
+        Assert.Equal("generate.roundCountAdjustment", await ErrorCode(prompt));
+
+        var drawn = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate",
+            new { allRounds = true, source = "entered", roundCount = 3 }, Json));
+        Assert.Equal(3, drawn["tournament"]!["numberOfRounds"]!.GetValue<int>());
+        Assert.Equal([2, 1, 3, 4], drawn["tournament"]!["stages"]![0]!["frozenRosterIds"]!.AsArray().Select(x => x!.GetValue<int>()));
+
+        var frozenEdit = await client.PutAsJsonAsync($"/api/tournaments/{id}/starting-numbers",
+            new { entries = new[] { new { participantId = 1, number = 3 } } }, Json);
+        Assert.Equal("startingNumbers.frozen", await ErrorCode(frozenEdit));
+
+        // Enter a result: generate and clear are both rejected by the API.
+        var t = drawn["tournament"]!.Deserialize<Tournament>(Json)!;
+        var game = t.Rounds[0].Pairings[0];
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/pairings/{game.Id}",
+            new PairingInput(game.BlackId, game.WhiteId, false, game.BoardNumber, false, 0, 0, false, GameResult.BlackWins, false, "", false), Json));
+        Assert.Equal("generate.lockedByResults", await ErrorCode(await client.PostAsJsonAsync(
+            $"/api/tournaments/{id}/rounds/2/generate", new { confirmReplace = true }, Json)));
+        Assert.Equal("clear.lockedByResults", await ErrorCode(await client.PostAsJsonAsync(
+            $"/api/tournaments/{id}/rounds/1/clear-round-robin", new { confirm = true }, Json)));
+
+        // Remove the result, then clear: single stage and no pairings left → Settings unlocked.
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/pairings/{game.Id}?confirmDiscardResult=true",
+            new PairingInput(game.BlackId, game.WhiteId, false, game.BoardNumber, false, 0, 0, false, GameResult.Unset, false, "", false), Json));
+        var preview = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/clear-round-robin", new { confirm = false }, Json);
+        Assert.Equal("clear.confirm", await ErrorCode(preview));
+        var cleared = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/clear-round-robin", new { confirm = true }, Json));
+        Assert.True(cleared["result"]!["settingsUnlocked"]!.GetValue<bool>());
+        Assert.False(cleared["systemLocked"]!.GetValue<bool>());
+        Assert.False(cleared["roundRobin"]!["frozen"]!.GetValue<bool>());
+        Assert.Equal(1, cleared["roundRobin"]!["numbers"]!["2"]!.GetValue<int>());
     }
 
     [Fact]

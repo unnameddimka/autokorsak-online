@@ -11,6 +11,7 @@ public sealed record TournamentView(
     IReadOnlyDictionary<int, int> GameCounts,
     bool SystemLocked,
     int? DefaultJoinRound,
+    RoundRobinState? RoundRobin,
     object? Result = null);
 
 /// <summary>
@@ -104,6 +105,6 @@ public sealed class TournamentService(Storage storage, TimeProvider clock)
         }
         var games = t.Participants.ToDictionary(p => p.Id, p => TournamentEditor.GameCount(t, p.Id));
         return new TournamentView(copy, t.LegacySourceXml is not null, games,
-            TournamentEditor.IsSystemLocked(t), TournamentEditor.DefaultJoinRound(t), result);
+            TournamentEditor.IsSystemLocked(t), TournamentEditor.DefaultJoinRound(t), PairingSchedule.DescribeRoundRobin(t), result);
     }
 }

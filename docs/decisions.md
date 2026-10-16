@@ -54,7 +54,7 @@ interpretations within it.
 | R1 | "Drawn" in the Settings lock means **any** pairing in the sole stage, including a manual one. | Safest reading of §2.1; agreed during spec review. |
 | R2 | A finalized participant whose joining round falls inside a not-yet-drawn round robin, after its start, **blocks the first draw** with an error naming them. | Spec §2.3 "or the referee must explicitly change it"; nobody is silently left out of the roster. |
 | R3 | Berger orientation: the standard FIDE tables, with the first-listed (first-moving) player as **Black**. | Spec §3.1 asks for a standard colour table; in Go, Black moves first. Tests verify the 4- and 6-player tables and colour balance ≤ 1. |
-| R4 | ~~An unplayed pairing with the same two players is kept whatever its colours.~~ **Revised after review of `e7b57590` (P2-02):** only **played** games match in either colour (§3.4). An unplayed game must have the exact Berger orientation; otherwise it is replaced after the usual confirmation. | The spec exempts played games only; the fixed Berger colours must be restorable. |
+| R4 | ~~An unplayed pairing with the same two players is kept whatever its colours.~~ **Revised after review of `e7b57590` (P2-02):** only **played** games match in either colour (§3.4); since spec 0002 an entered result locks round-robin generation altogether. An unplayed game must have the exact Berger orientation; otherwise it is replaced after the usual confirmation. | The spec exempts played games only; the fixed Berger colours must be restorable. |
 | R5 | Generated pairings take board numbers 1…n in fixture order, skipping boards used by kept pairings; the bye takes the next number. | Spec §3.1: existing board conventions. |
 | R6 | A legacy bye with no player (`Black=-1`) awards nothing, raises no notice, and is not an awarded outcome. | There is no recipient; spec §4 scores the sole real participant. |
 | R7 | The default joining round for a new player is the current round if it has no **awarded outcome**, otherwise the next round, adjusted for round-robin stages. An awarded outcome is a recorded result or a bye with a real player (revised after review P2-03). If no round is left, the API returns `participant.joinRoundRequired`, or the specific round-robin reason when one applies. No round is ever created automatically. | Spec §2.3 and test 20. |
@@ -64,6 +64,28 @@ interpretations within it.
 | R11 | **Awarded outcome** (`Pairing.HasAwardedOutcome`) = a recorded result **or** a credited bye. It governs joining-round defaults, the stage-change barrier (a credited bye blocks a change exactly like a played game), generator immutability (a credited bye that is not the fixture bye blocks generation), and the discard confirmation for deleting or reassigning a pairing. The "round is being played" condition for skipped-round notices still counts only two-player results, so a bye entered first does not flag the unpaired players. | Review P2-03; spec §1 (outcomes are never removed automatically) and §2.2. |
 | R12 | The Settings system lock is **monotonic**. `Tournament.PairingsEverDrawn` is set on the first manual or generated pairing, on import when pairings exist, when data saved before 0001 that already contains pairings is loaded, and whenever a pairing is deleted. A frozen round-robin roster also locks. | Review P2-01; spec §2.1 "once any pairing has been drawn". |
 | R13 | A frozen round-robin member cannot be marked unavailable in a round of that stage (409 `participant.rosterMemberUnavailable`); the editor disables those checkboxes. Withdrawals use referee-decision technical results (§5.3). Imported states that already contain such absences still stop generation with `generate.playerUnavailable`. | Review P1-01; spec §2.3 "cannot silently invalidate frozen schedules". |
+
+## Spec 0002 decisions (2026-10-16)
+
+Spec 0002 (approved by the owner on 2026-10-16) **overrides** three 0001 behaviours:
+- implicit registration-order starting numbers are removed;
+- round-robin regeneration around played games (0001 §3.4 / R4) is replaced by the result lock;
+- the monotonic Settings lock (R12) may be reset, but only by a successful single-stage Clear that leaves no
+  pairings.
+
+The 0001 tests that relied on the old behaviour were rewritten (registration order became explicit numbering;
+"played game kept on regeneration" became "generation locked").
+
+| # | Decision | Rationale |
+|---|---|---|
+| S1 | Player card API: `startingNumber` null = unchanged, 0 = clear, positive = set. The Pairings table uses `PUT …/starting-numbers`, where null = clear. Both share one server rule set (`CheckDraftEditable`). | Old clients and unrelated card edits never touch drafts; identical rules for both editors (§6). |
+| S2 | Drafts are whole numbers 1–999. Edits are refused (409) when the stage is frozen, the player is not eligible (preliminary, or joining after the stage start), or the tournament has no round-robin stage. A batch with any bad row applies nothing. Gaps and duplicates are only checked at generation. | Spec §2.1–2.2; agreed during spec review. |
+| S3 | The confirmation order is the number source first (a client-side choice dialog when "random" is ticked and drafts exist), then the server's `generate.roundCountAdjustment` 409, then one final request with `source` and `roundCount`. The server rechecks everything on that request. | Spec §4.2 fixed order; a 409 confirmation request writes nothing. |
+| S4 | The server validates entered numbers **before** asking about the round count, so invalid numbers are reported without a pointless resize prompt. | Matches "numbers first". |
+| S5 | Clear has a preflight (`confirm=false` → 409 `clear.confirm` with counts) so the dialog shows exact numbers; the confirmed request rechecks the lock. | Spec §5.1 confirmation contents; §6 revalidation. |
+| S6 | The header save indicator ignores 409 confirmation requests (`clear.confirm`, `generate.roundCountAdjustment`, `generate.replaceUnplayed`, `pairing.resultWouldBeDiscarded`, `stage.unplayedPairingsWillBeDeleted`). | Nothing was attempted, so "last change not saved" would mislead. |
+| S7 | After a clear that unlocks Settings and a switch to another system, stored drafts remain but are hidden, because the field only appears in tournaments with a round-robin stage. | Agreed during spec review; no data loss. |
+| S8 | The browser smoke test runs on a separate disposable container (`127.0.0.1:8091`); the live instance is not redeployed without the owner's instruction. | Spec §7.4 "do not deploy without the owner's separate instruction". |
 
 ## Open questions (for the referee / owner)
 

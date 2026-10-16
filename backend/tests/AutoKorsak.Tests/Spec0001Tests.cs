@@ -24,11 +24,28 @@ public class Spec0001Tests
         var cycle = players % 2 == 0 ? players - 1 : players;
         var t = TournamentEditor.Create(Settings("RR", TournamentSystem.RoundRobin, rounds ?? cycle), DateTimeOffset.UnixEpoch);
         for (var i = 1; i <= players; i++) TournamentEditor.AddParticipant(t, Player($"P{i}", rating: 2000 - i * 10));
+        NumberByRegistration(t, 1); // spec 0002: explicit starting numbers (registration order, as 0001 seeded)
         return t;
     }
 
-    private static GenerationResult Generate(Tournament t, int round, bool all = false, bool random = false, bool confirm = false, IRandomSource? source = null) =>
-        PairingSchedule.GenerateRoundRobin(t, round, all, random, confirm, source ?? Ordered);
+    /// <summary>
+    /// Spec 0001 seeded by registration order; spec 0002 removed that implicit fallback, so these tests express it as an
+    /// explicit manual numbering (1..N in ID order) before a non-random draw.
+    /// </summary>
+    private static GenerationResult Generate(Tournament t, int round, bool all = false, bool random = false, bool confirm = false,
+        IRandomSource? source = null, int? roundCount = null)
+    {
+        return PairingSchedule.GenerateRoundRobin(t, round, all,
+            random ? StartingNumberSource.Random : StartingNumberSource.Entered, roundCount, confirm, source ?? Ordered);
+    }
+
+    internal static void NumberByRegistration(Tournament t, int round)
+    {
+        var stage = t.StageFor(round);
+        if (!stage.IsRoundRobin || stage.IsFrozen) return;
+        var eligible = t.Participants.Where(p => PairingSchedule.IsRoundRobinEligible(p, stage)).OrderBy(p => p.Id).ToList();
+        for (var i = 0; i < eligible.Count; i++) eligible[i].StartingNumber = i + 1;
+    }
 
     private static string Json(Tournament t) => JsonSerializer.Serialize(t, Storage.Json);
 
@@ -166,8 +183,11 @@ public class Spec0001Tests
     public void Terminal_round_robin_stage_needs_exactly_one_cycle_checked_at_generation()
     {
         var t = RoundRobin(4, rounds: 5); // settings save is fine during registration
-        Assert.Equal("generate.roundCountMismatch", Assert.Throws<DomainException>(() => Generate(t, 1)).Code);
+        var prompt = Assert.Throws<DomainException>(() => Generate(t, 1)); // spec 0002 §4 replaced the 0001 mismatch error
+        Assert.Equal("generate.roundCountAdjustment", prompt.Code);
+        Assert.Equal(3, prompt.Args["required"]);
         Assert.Null(t.Stages[0].FrozenRosterIds);
+        Assert.Equal(5, t.NumberOfRounds);
 
         var prefix = RoundRobin(4, rounds: 7);
         PairingSchedule.ChangeSystem(prefix, 4, TournamentSystem.Swiss, false);
@@ -188,12 +208,12 @@ public class Spec0001Tests
         var game = t.Rounds[0].Pairings[0];
         TournamentEditor.UpdatePairing(t, game.Id,
             new PairingInput(game.WhiteId, game.BlackId, false, game.BoardNumber, true, 2, 0.5m, false, GameResult.WhiteWins, true, "swapped", false), false);
-        var stored = JsonSerializer.Serialize(game, Storage.Json);
+        var before = Json(t);
 
-        Generate(t, 1, all: true);
+        // Spec 0002 §5.2 supersedes 0001's permissive regeneration: an entered result locks generation.
+        Assert.Equal("generate.lockedByResults", Assert.Throws<DomainException>(() => Generate(t, 1, all: true)).Code);
 
-        Assert.Equal(stored, JsonSerializer.Serialize(t.Rounds[0].Pairings.Single(p => p.Id == game.Id), Storage.Json));
-        Assert.Equal(2, t.Rounds[0].Pairings.Count);
+        Assert.Equal(before, Json(t)); // the swapped played game and everything else stay unchanged
     }
 
     [Fact]
@@ -206,7 +226,7 @@ public class Spec0001Tests
 
         var ex = Assert.Throws<DomainException>(() => Generate(t, 1, all: true, confirm: true));
 
-        Assert.Equal("generate.playedPairingConflicts", ex.Code);
+        Assert.Equal("generate.lockedByResults", ex.Code); // spec 0002 §5.2 (0001 reported playedPairingConflicts)
         Assert.Equal(before, Json(t)); // no roster freeze, no pairings, no ID increments
     }
 
@@ -265,7 +285,8 @@ public class Spec0001Tests
             TournamentEditor.UpdatePairing(t, p.Id, new PairingInput(p.BlackId, p.WhiteId, false, p.BoardNumber, false, 0, 0, false, result, true, "withdrawn", false), false);
         }
         var reloaded = Clone(t);
-        Generate(reloaded, 1, all: true);
+        // Spec 0002 §5.2: the technical results lock further RR generation; nothing is changed.
+        Assert.Equal("generate.lockedByResults", Assert.Throws<DomainException>(() => Generate(reloaded, 1, all: true)).Code);
         var technical = reloaded.AllPairings().Where(x => x.Pairing.Involves(4)).Select(x => x.Pairing).ToList();
         Assert.Equal(3, technical.Count);
         Assert.All(technical, p => Assert.True(p.ResultByReferee));
@@ -388,6 +409,7 @@ public class Spec0001Tests
         t.CurrentRound = 2;
         Assert.Equal(1, TournamentEditor.AddParticipant(t, Player("P5")).FirstEligibleRound); // pre-draw default normalized to start
         TournamentEditor.UpdateSettings(t, Settings("RR", TournamentSystem.RoundRobin, 5));
+        NumberByRegistration(t, 1);
 
         var pending = t.Participants.Single(p => p.DisplayName == "P5");
         pending.FirstEligibleRound = 3; // inconsistent registration (e.g. older data)

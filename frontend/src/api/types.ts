@@ -42,6 +42,8 @@ export interface Participant {
   startScore: number;
   preliminary: boolean;
   firstEligibleRound: number;
+  /** Draft round-robin starting number (spec 0002); the frozen roster is canonical once drawn. */
+  startingNumber: number | null;
   notPlayingRounds: number[];
   comment: string;
   displayName: string;
@@ -106,6 +108,7 @@ export interface TournamentView {
   gameCounts: Record<string, number>;
   systemLocked: boolean;
   defaultJoinRound: number | null;
+  roundRobin: RoundRobinState | null;
   result?: unknown;
 }
 
@@ -121,7 +124,11 @@ export type ParticipantInput = Pick<
   Participant,
   | 'localFirstName' | 'localSurname' | 'firstName' | 'surname' | 'rating' | 'rank' | 'rankShift' | 'grade' | 'country'
   | 'club' | 'nationality' | 'team' | 'coach' | 'preliminary' | 'notPlayingRounds' | 'comment' | 'catalogEntryId'
-> & { firstEligibleRound: number | null };
+> & {
+  firstEligibleRound: number | null;
+  /** null = unchanged, 0 = clear, positive = set (spec 0002). */
+  startingNumber?: number | null;
+};
 
 export type PairingInput = Omit<Pairing, 'id' | 'legacyResultToken' | 'boardNumber'> & { boardNumber: number | null };
 
@@ -166,7 +173,20 @@ export interface Preparation {
   notices: string[];
 }
 
-export interface GenerationResult { rounds: number[]; created: number; replaced: number; kept: number; rosterFrozen: boolean }
+export interface GenerationResult { rounds: number[]; created: number; replaced: number; kept: number; rosterFrozen: boolean; numberOfRounds: number }
+export interface ClearResult { deleted: number; byes: number; settingsUnlocked: boolean }
+export type StartingNumberSource = 'entered' | 'random';
+
+/** Server read model of the round-robin stage: numbers (frozen or draft), eligibility and the result lock. */
+export interface RoundRobinState {
+  startRound: number;
+  endRound: number;
+  frozen: boolean;
+  randomStartingNumbers: boolean;
+  numbers: Record<string, number | null>;
+  eligible: number[];
+  lockedBy: { round: number; board: number }[];
+}
 export interface SkippedParticipant { id: number; name: string; code: string; args: Record<string, unknown> }
 export interface FinalizeResult { finalized: number[]; skipped: SkippedParticipant[] }
 

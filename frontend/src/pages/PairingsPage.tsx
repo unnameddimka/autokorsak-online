@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { api, ApiError } from '../api/client';
-import type { GenerationResult, Pairing, Participant, TournamentSystem } from '../api/types';
-import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
+import type { Pairing, Participant, TournamentSystem } from '../api/types';
+import { Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import { errorMessage, formatRank, resultLabel, roman, stageEnd, stageFor, systemLabel } from '../format';
 import { useTournament } from './TournamentLayout';
 import { PairingEditor } from './PairingEditor';
+import { RoundRobinPanel } from './RoundRobinPanel';
 
 export function PairingsPage() {
   const { tournament } = useTournament();
@@ -107,8 +108,6 @@ function StagePanel() {
   const { t, tk } = useI18n();
   const [changing, setChanging] = useState(false);
   const current = stageFor(tournament, tournament.currentRound);
-  const byId = new Map(tournament.participants.map((p) => [p.id, p]));
-  const roster = current.system === 'roundRobin' ? current.frozenRosterIds : null;
   const lastStart = Math.max(...tournament.stages.map((s) => s.startRound), 1);
   const canChange = lastStart + 1 <= tournament.numberOfRounds;
 
@@ -133,74 +132,20 @@ function StagePanel() {
           })}
         </ol>
       )}
-      {roster && (
-        <details className="starting-numbers">
-          <summary>
-            {current.randomStartingNumbers ? t('generate.numbersFrozenRandom') : t('generate.numbersFrozenOrdered')}
-          </summary>
-          <ol>
-            {roster.map((id) => <li key={id}>{byId.get(id)?.displayName ?? id}</li>)}
-          </ol>
-        </details>
-      )}
       {changing && <ChangeSystemDialog minRound={lastStart + 1} onClose={() => setChanging(false)} />}
     </section>
   );
 }
 
 function GeneratePanel() {
-  const { tournament, run } = useTournament();
-  const { t, tk } = useI18n();
-  const toast = useToast();
-  const confirm = useConfirm();
-  const [allRounds, setAllRounds] = useState(false);
-  const [randomNumbers, setRandomNumbers] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const round = tournament.currentRound;
-  const stage = stageFor(tournament, round);
-  const isRoundRobin = stage.system === 'roundRobin';
-  const frozen = stage.frozenRosterIds !== null;
-
-  async function generate(confirmReplace = false): Promise<void> {
-    setBusy(true);
-    try {
-      const view = await run(() => api.generate(tournament.id, round, { allRounds, randomStartingNumbers: randomNumbers, confirmReplace }));
-      const r = view.result as GenerationResult;
-      toast.success(t('generate.done', { created: r.created, replaced: r.replaced, kept: r.kept }));
-    } catch (e) {
-      if (e instanceof ApiError && e.code === 'generate.replaceUnplayed' && !confirmReplace) {
-        setBusy(false);
-        const ok = await confirm({
-          title: t('generate.replaceTitle'),
-          message: tk('error.generate.replaceUnplayed', 'error.unknown', e.args),
-          confirmLabel: t('generate.replaceConfirm'),
-          danger: true,
-        });
-        if (ok) await generate(true);
-        return;
-      }
-      toast.error(e);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (!isRoundRobin) {
-    return (
-      <div className="generate-panel">
-        <button type="button" disabled aria-describedby="generate-hint">{t('pairings.generate')}</button>
-        <span id="generate-hint" className="muted">{t('pairings.generateUnavailable')}</span>
-      </div>
-    );
-  }
-
+  const { tournament, view } = useTournament();
+  const { t } = useI18n();
+  const stage = stageFor(tournament, tournament.currentRound);
+  if (stage.system === 'roundRobin' && view.roundRobin) return <RoundRobinPanel />;
   return (
     <div className="generate-panel">
-      <button type="button" className="primary" onClick={() => generate()} disabled={busy}>{t('pairings.generate')}</button>
-      <Checkbox label={t('generate.allRounds')} checked={allRounds} onChange={setAllRounds} />
-      {frozen
-        ? <span className="muted">{stage.randomStartingNumbers ? t('generate.numbersFrozenRandom') : t('generate.numbersFrozenOrdered')}</span>
-        : <Checkbox label={t('generate.randomNumbers')} hint={t('generate.randomNumbersHint')} checked={randomNumbers} onChange={setRandomNumbers} />}
+      <button type="button" disabled aria-describedby="generate-hint">{t('pairings.generate')}</button>
+      <span id="generate-hint" className="muted">{t('pairings.generateUnavailable')}</span>
     </div>
   );
 }

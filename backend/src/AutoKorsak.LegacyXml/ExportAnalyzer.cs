@@ -72,6 +72,7 @@ public static class ExportAnalyzer
             Check("participant", "availability", n, string.Join(',', p.NotPlayingRounds), string.Join(',', q.NotPlayingRounds));
             Check("participant", "comment", n, p.Comment, q.Comment);
             Check("participant", "firstEligibleRound", n, p.FirstEligibleRound, q.FirstEligibleRound);
+            Check("participant", "startingNumber", n, p.StartingNumber, q.StartingNumber); // spec 0002 §6: no XML mapping
         }
 
         foreach (var round in t.Rounds)

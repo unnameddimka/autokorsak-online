@@ -2,7 +2,23 @@ namespace AutoKorsak.Domain;
 
 public sealed record StageChangeResult(int StartRound, TournamentSystem System, int DeletedPairings);
 
-public sealed record GenerationResult(IReadOnlyList<int> Rounds, int Created, int Replaced, int Kept, bool RosterFrozen);
+public sealed record GenerationResult(IReadOnlyList<int> Rounds, int Created, int Replaced, int Kept, bool RosterFrozen, int NumberOfRounds);
+
+/// <summary>Where a first round-robin draw takes its starting numbers from (spec 0002 §3).</summary>
+public enum StartingNumberSource { Entered, Random }
+
+public sealed record ClearResult(int Deleted, int Byes, bool SettingsUnlocked);
+
+public sealed record LockedGame(int Round, int Board);
+
+public sealed record RoundRobinState(
+    int StartRound,
+    int EndRound,
+    bool Frozen,
+    bool RandomStartingNumbers,
+    IReadOnlyDictionary<int, int?> Numbers,
+    IReadOnlyList<int> Eligible,
+    IReadOnlyList<LockedGame> LockedBy);
 
 /// <summary>Source of randomness for starting-number draws; replaceable in tests.</summary>
 public interface IRandomSource
@@ -92,7 +108,8 @@ public static class PairingSchedule
     }
 
     public static GenerationResult GenerateRoundRobin(
-        Tournament t, int round, bool allRounds, bool randomStartingNumbers, bool confirmReplace, IRandomSource random)
+        Tournament t, int round, bool allRounds, StartingNumberSource source, int? confirmedRoundCount, bool confirmReplace,
+        IRandomSource random)
     {
         t.EnsureStages();
         if (round < 1 || round > t.NumberOfRounds)
@@ -100,23 +117,40 @@ public static class PairingSchedule
         var stage = t.StageFor(round);
         if (!stage.IsRoundRobin) throw new DomainException("generate.notAvailable");
         var start = stage.StartRound;
-        var end = t.StageEnd(stage);
 
-        // 1. Roster: the frozen one, or the eligible finalized participants at the stage start.
-        var roster = stage.FrozenRosterIds ?? DrawRoster(t, stage, end, randomStartingNumbers, random);
+        // Spec 0002 §5.2: any entered two-player result in the stage locks round-robin generation.
+        var locked = EnteredResults(t, stage);
+        if (locked.Count > 0) throw DomainException.Conflict("generate.lockedByResults", LockArgs(locked));
+
+        // 1. Roster: the frozen one, or the eligible participants ordered by entered or random starting numbers.
+        var roster = stage.FrozenRosterIds ?? DrawRoster(t, stage, source, random);
         if (roster.Count < 2) throw new DomainException("generate.tooFewPlayers");
         var players = roster.Count;
         var cycle = players % 2 == 0 ? players - 1 : players;
+
+        // 2. Stage length: a terminal stage must be exactly one cycle; the referee may confirm a round-count change.
+        var roundCount = t.NumberOfRounds;
+        if (!t.HasLaterStage(stage))
+        {
+            var required = start - 1 + cycle;
+            if (t.NumberOfRounds != required)
+            {
+                if (confirmedRoundCount != required)
+                    throw DomainException.Conflict("generate.roundCountAdjustment",
+                        Args(("players", players), ("required", required), ("current", t.NumberOfRounds)));
+                ValidateRoundCountChange(t, required);
+                roundCount = required;
+            }
+        }
+        var end = t.HasLaterStage(stage) ? t.StageEnd(stage) : roundCount;
         var length = end - start + 1;
-        if (!t.HasLaterStage(stage) && length != cycle)
-            throw new DomainException("generate.roundCountMismatch",
-                Args(("players", players), ("required", cycle), ("actual", length), ("start", start)));
         if (length > cycle)
             throw new DomainException("generate.stageTooLong", Args(("players", players), ("required", cycle), ("actual", length)));
+        if (round > end) throw new DomainException("round.outOfRange", Args(("max", end)));
 
         var targets = allRounds ? Enumerable.Range(start, length).ToList() : new List<int> { round };
 
-        // 2. Plan every requested round before mutating anything.
+        // 3. Plan every requested round before mutating anything.
         var plans = new List<RoundPlan>();
         foreach (var number in targets)
         {
@@ -138,12 +172,15 @@ public static class PairingSchedule
             throw DomainException.Conflict("generate.replaceUnplayed",
                 Args(("count", replaced), ("rounds", RoundList(plans.Where(p => p.Remove.Count > 0).Select(p => p.Number)))));
 
-        // 3. Apply atomically (nothing above has written).
+        // 4. Apply atomically (nothing above has written): round count, numbers, roster freeze, pairings.
+        if (roundCount != t.NumberOfRounds) ApplyRoundCount(t, roundCount);
         var froze = stage.FrozenRosterIds is null;
         if (froze)
         {
             stage.FrozenRosterIds = roster;
-            stage.RandomStartingNumbers = randomStartingNumbers;
+            stage.RandomStartingNumbers = source == StartingNumberSource.Random;
+            if (source == StartingNumberSource.Random)
+                for (var i = 0; i < roster.Count; i++) t.FindParticipant(roster[i])!.StartingNumber = i + 1;
         }
         var created = 0;
         t.PairingsEverDrawn = true;
@@ -171,15 +208,117 @@ public static class PairingSchedule
             }
             r.Pairings.Sort((a, b) => a.BoardNumber.CompareTo(b.BoardNumber));
         }
-        return new GenerationResult(targets, created, replaced, plans.Sum(p => p.Kept), froze);
+        return new GenerationResult(targets, created, replaced, plans.Sum(p => p.Kept), froze, roundCount);
+    }
+
+    // ---------- clear round-robin draw (spec 0002 §5) ----------
+
+    public static ClearResult ClearRoundRobin(Tournament t, int round, bool confirm)
+    {
+        t.EnsureStages();
+        if (round < 1 || round > t.NumberOfRounds)
+            throw new DomainException("round.outOfRange", Args(("max", t.NumberOfRounds)));
+        var stage = t.StageFor(round);
+        if (!stage.IsRoundRobin) throw new DomainException("clear.notRoundRobin");
+        var locked = EnteredResults(t, stage);
+        if (locked.Count > 0) throw DomainException.Conflict("clear.lockedByResults", LockArgs(locked));
+
+        var end = t.StageEnd(stage);
+        var rounds = t.Rounds.Where(r => r.Number >= stage.StartRound && r.Number <= end && r.Pairings.Count > 0).ToList();
+        var count = rounds.Sum(r => r.Pairings.Count);
+        var byes = rounds.Sum(r => r.Pairings.Count(p => p.IsBye));
+        if (count == 0 && !stage.IsFrozen) throw new DomainException("clear.nothingToClear");
+        if (!confirm)
+            throw DomainException.Conflict("clear.confirm",
+                Args(("count", count), ("byes", byes), ("rounds", RoundList(rounds.Select(r => r.Number)))));
+
+        // The last effective numbers stay visible as editable drafts (§5.1 step 3).
+        if (stage.FrozenRosterIds is { } roster)
+            for (var i = 0; i < roster.Count; i++)
+                if (t.FindParticipant(roster[i]) is { } p) p.StartingNumber = i + 1;
+        foreach (var r in rounds) r.Pairings.Clear();
+        stage.FrozenRosterIds = null;
+        stage.RandomStartingNumbers = false;
+
+        // §5.1 step 6: the sole non-monotonic exception to the 0001 Settings lock.
+        var unlocked = t.Stages.Count == 1 && t.Rounds.All(r => r.Pairings.Count == 0);
+        if (unlocked) t.PairingsEverDrawn = false;
+        return new ClearResult(count, byes, unlocked);
+    }
+
+    /// <summary>The single round-robin stage in 0002 scope (a later RR stage is deferred), or null.</summary>
+    public static PairingStage? RoundRobinStage(Tournament t)
+    {
+        t.EnsureStages();
+        return t.Stages.FirstOrDefault(s => s.IsRoundRobin);
+    }
+
+    /// <summary>Eligible for the RR numbered roster: finalized and taking part from the stage start (spec 0002 §2.1).</summary>
+    public static bool IsRoundRobinEligible(Participant p, PairingStage stage) =>
+        !p.Preliminary && p.FirstEligibleRound <= stage.StartRound;
+
+    /// <summary>Read model for the UI: numbers (frozen or draft), eligibility and the result lock.</summary>
+    public static RoundRobinState? DescribeRoundRobin(Tournament t)
+    {
+        var stage = RoundRobinStage(t);
+        if (stage is null) return null;
+        var numbers = new Dictionary<int, int?>();
+        foreach (var p in t.Participants) numbers[p.Id] = p.StartingNumber;
+        if (stage.FrozenRosterIds is { } roster)
+        {
+            // Frozen numbers for roster members; others keep showing their retained (inactive) draft.
+            for (var i = 0; i < roster.Count; i++) numbers[roster[i]] = i + 1;
+        }
+        var eligible = t.Participants.Where(p => stage.FrozenRosterIds?.Contains(p.Id) ?? IsRoundRobinEligible(p, stage))
+            .Select(p => p.Id).ToList();
+        var locked = EnteredResults(t, stage);
+        return new RoundRobinState(stage.StartRound, t.StageEnd(stage), stage.IsFrozen, stage.RandomStartingNumbers,
+            numbers, eligible, locked.Select(x => new LockedGame(x.Round, x.Board)).ToList());
+    }
+
+    /// <summary>Two-player pairings with an entered result in the stage (byes never lock, spec 0002 §5.2).</summary>
+    private static List<(int Round, int Board)> EnteredResults(Tournament t, PairingStage stage)
+    {
+        var end = t.StageEnd(stage);
+        return t.Rounds.Where(r => r.Number >= stage.StartRound && r.Number <= end)
+            .SelectMany(r => r.Pairings.Where(p => !p.IsBye && p.HasRecordedResult).Select(p => (r.Number, p.BoardNumber)))
+            .OrderBy(x => x.Item1).ThenBy(x => x.Item2).ToList();
+    }
+
+    private static Dictionary<string, object?> LockArgs(List<(int Round, int Board)> games) =>
+        Args(("count", games.Count), ("games", string.Join(", ", games.Select(g => $"{g.Round}/{g.Board}"))));
+
+    private static void ValidateRoundCountChange(Tournament t, int target)
+    {
+        if (target < 1 || target > TournamentEditor.MaxRounds)
+            throw new DomainException("generate.roundCountOutOfRange", Args(("required", target), ("max", TournamentEditor.MaxRounds)));
+        if (target >= t.NumberOfRounds) return;
+        var blocked = new SortedSet<int>();
+        foreach (var r in t.Rounds.Where(r => r.Number > target && r.Pairings.Count > 0)) blocked.Add(r.Number);
+        foreach (var s in t.Stages.Where(s => s.StartRound > target)) blocked.Add(s.StartRound);
+        foreach (var p in t.Participants)
+        {
+            if (p.FirstEligibleRound > target) blocked.Add(p.FirstEligibleRound);
+            foreach (var r in p.NotPlayingRounds.Where(r => r > target)) blocked.Add(r);
+        }
+        if (blocked.Count > 0)
+            throw DomainException.Conflict("generate.roundCountShrinkBlocked", Args(("required", target), ("rounds", RoundList(blocked))));
+    }
+
+    private static void ApplyRoundCount(Tournament t, int target)
+    {
+        t.NumberOfRounds = target;
+        t.Rounds.RemoveAll(r => r.Number > target); // validated empty
+        t.CurrentRound = Math.Clamp(t.CurrentRound, 1, target);
     }
 
     private sealed record Slot(int Black, int? White);
 
     private sealed record RoundPlan(int Number, List<Pairing> Remove, List<Slot> Create, int Kept);
 
-    private static List<int> DrawRoster(Tournament t, PairingStage stage, int end, bool random, IRandomSource source)
+    private static List<int> DrawRoster(Tournament t, PairingStage stage, StartingNumberSource source, IRandomSource random)
     {
+        var end = t.StageEnd(stage);
         var pending = t.Participants
             .Where(p => !p.Preliminary && p.FirstEligibleRound > stage.StartRound && p.FirstEligibleRound <= end)
             .Select(p => p.DisplayName).ToList();
@@ -187,16 +326,48 @@ public static class PairingSchedule
             throw new DomainException("generate.participantJoinsMidRoundRobin",
                 Args(("names", string.Join(", ", pending)), ("start", stage.StartRound)));
 
-        var roster = t.Participants
-            .Where(p => !p.Preliminary && p.FirstEligibleRound <= stage.StartRound)
-            .Select(p => p.Id).Order().ToList();
-        if (random)
+        var eligible = t.Participants.Where(p => IsRoundRobinEligible(p, stage)).OrderBy(p => p.Id).ToList();
+        if (source == StartingNumberSource.Random)
+        {
+            var roster = eligible.Select(p => p.Id).ToList();
             for (var i = roster.Count - 1; i > 0; i--) // Fisher–Yates: one permutation, persisted as is
             {
-                var j = source.Next(i + 1);
+                var j = random.Next(i + 1);
                 (roster[i], roster[j]) = (roster[j], roster[i]);
             }
-        return roster;
+            return roster;
+        }
+        ValidateEnteredNumbers(eligible);
+        return eligible.OrderBy(p => p.StartingNumber).Select(p => p.Id).ToList();
+    }
+
+    /// <summary>Entered numbers must be exactly 1..N among the N eligible players (spec 0002 §2.2).</summary>
+    private static void ValidateEnteredNumbers(List<Participant> eligible)
+    {
+        var n = eligible.Count;
+        var missing = eligible.Where(p => p.StartingNumber is null)
+            .Select(p => new Dictionary<string, object?> { ["id"] = p.Id, ["name"] = p.DisplayName }).ToList();
+        var outOfRange = eligible.Where(p => p.StartingNumber is { } v && (v < 1 || v > n))
+            .Select(p => new Dictionary<string, object?> { ["id"] = p.Id, ["name"] = p.DisplayName, ["value"] = p.StartingNumber }).ToList();
+        var duplicates = eligible.Where(p => p.StartingNumber is { } v && v >= 1 && v <= n)
+            .GroupBy(p => p.StartingNumber!.Value).Where(g => g.Count() > 1)
+            .Select(g => new Dictionary<string, object?>
+            {
+                ["number"] = g.Key,
+                ["ids"] = g.Select(p => p.Id).ToList(),
+                ["names"] = string.Join(", ", g.Select(p => p.DisplayName)),
+            }).ToList();
+        var used = eligible.Select(p => p.StartingNumber).OfType<int>().ToHashSet();
+        var gaps = Enumerable.Range(1, n).Where(i => !used.Contains(i)).ToList();
+        if (missing.Count + outOfRange.Count + duplicates.Count + gaps.Count == 0) return;
+        throw new DomainException("generate.startingNumbersInvalid", new Dictionary<string, object?>
+        {
+            ["max"] = n,
+            ["missing"] = missing,
+            ["outOfRange"] = outOfRange,
+            ["duplicates"] = duplicates,
+            ["gaps"] = gaps,
+        });
     }
 
     /// <summary>

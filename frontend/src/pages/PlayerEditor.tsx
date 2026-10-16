@@ -34,6 +34,11 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   const games = participant ? view.gameCounts[String(participant.id)] ?? 0 : 0;
   // A finally registered player with pairings cannot become preliminary (the server enforces this too).
   const preliminaryBlocked = !isNew && !participant.preliminary && games > 0;
+  // Spec 0002 §2: the starting number (round-robin tournaments only). Frozen numbers come from the drawn roster.
+  const rr = view.roundRobin;
+  const initialNumber = participant ? rr?.numbers[String(participant.id)] ?? null : null;
+  const [numberText, setNumberText] = useState(initialNumber?.toString() ?? '');
+  const numberEditable = !!rr && !rr.frozen && !form.preliminary && (form.firstEligibleRound ?? 1) <= rr.startRound;
 
   const set = <K extends keyof ParticipantInput>(key: K, value: ParticipantInput[K]) => setForm((f) => ({ ...f, [key]: value }));
   const text = (key: 'localSurname' | 'localFirstName' | 'surname' | 'firstName' | 'grade' | 'country' | 'club' | 'nationality' | 'team' | 'coach' | 'comment') => ({
@@ -42,10 +47,18 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   });
 
   async function save() {
+    const trimmed = numberText.trim();
+    if (trimmed !== '' && !/^d+$/.test(trimmed)) {
+      setError(new ApiError('startingNumbers.invalidValue', { value: trimmed, max: 999 }, 400));
+      return;
+    }
+    // null = unchanged, 0 = clear, n = set (the server applies the same rules as the Pairings table).
+    const startingNumber = trimmed === (initialNumber?.toString() ?? '') ? null : trimmed === '' ? 0 : Number(trimmed);
+    const input = { ...form, startingNumber };
     setSaving(true);
     setError(null);
     try {
-      await run(() => (isNew ? api.addParticipant(tournament.id, form) : api.updateParticipant(tournament.id, participant.id, form)));
+      await run(() => (isNew ? api.addParticipant(tournament.id, input) : api.updateParticipant(tournament.id, participant.id, input)));
       toast.success(isNew ? t('player.added') : t('player.saved'));
       onClose();
     } catch (e) {
@@ -152,6 +165,12 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
           <span className="field-hint">{t('player.registrationHint')}{preliminaryBlocked && <> {t('player.preliminaryBlocked')}</>}</span>
         </fieldset>
 
+        {rr && (
+          <Field label={t('field.startingNumber')}
+            hint={rr.frozen ? t('player.startingNumberFrozen') : !numberEditable ? t('player.startingNumberInactive') : t('player.startingNumberHint')}>
+            <input inputMode="numeric" value={numberText} disabled={!numberEditable} onChange={(e) => setNumberText(e.target.value)} />
+          </Field>
+        )}
         <Field label={t('field.firstEligibleRound')} hint={t('player.joinRoundHint')}>
           <select value={form.firstEligibleRound ?? ''}
             onChange={(e) => set('firstEligibleRound', e.target.value === '' ? null : Number(e.target.value))}>

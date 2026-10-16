@@ -16,7 +16,8 @@
 | Spec | Title | Status |
 |---|---|---|
 | [devel-specs/0000-ui-prototype.md](devel-specs/0000-ui-prototype.md) | Functional UI prototype | Approved 2026-10-16; implemented and accepted on review |
-| [devel-specs/0001-pairing-stages-round-robin-and-score-group-view.md](devel-specs/0001-pairing-stages-round-robin-and-score-group-view.md) | Pairing stages, round-robin generation, bye scoring, score-group view | Approved 2026-10-16; implemented (see [status.md](status.md)) |
+| [devel-specs/0001-pairing-stages-round-robin-and-score-group-view.md](devel-specs/0001-pairing-stages-round-robin-and-score-group-view.md) | Pairing stages, round-robin generation, bye scoring, score-group view | Approved 2026-10-16; implemented and accepted on review |
+| [devel-specs/0002-round-robin-starting-numbers-and-draw-reset.md](devel-specs/0002-round-robin-starting-numbers-and-draw-reset.md) | Manual round-robin starting numbers, round-count adjustment, clear draw | Approved 2026-10-16; implemented (see [status.md](status.md)) |
 
 New scope and changed requirements go into new numbered specs (`0001-…`). Approved specs are never rewritten.
 

@@ -1,8 +1,9 @@
 # Status
 
 **Current version:** spec 0001 (pairing stages, round robin, bye scoring, score-group view) on top of spec 0000,
-2026-10-16. Spec 0000 was accepted after review (final version `8fd3898`). Spec 0001 was implemented in `e7b57590`
-and reviewed; this version contains the review corrections and awaits re-review.
+2026-10-16. Spec 0000 was accepted after review (final version `8fd3898`); spec 0001 was accepted after review
+(final version `b565ad20`). Spec 0002 (manual starting numbers, round-count adjustment, clear draw) is implemented
+and awaits independent review. The live container still runs the 0001 version until the owner asks to redeploy.
 
 ## What works
 
@@ -31,6 +32,15 @@ and reviewed; this version contains the review corrections and awaits re-review.
   then frozen and shown. Odd rosters get one bye per round. Played games are never changed (a swapped-colour played
   game is accepted). Replacing unplayed pairings needs confirmation. Swiss, McMahon and Scheveningen generators
   remain disabled.
+- **Round-robin numbering and reset (0002):**
+  - Starting numbers are edited in the player card or in an editable table on Pairings (batch save). Inactive players
+    keep a disabled, retained draft.
+  - The draw uses either the entered numbers (exactly 1..N, with errors that name the players and numbers) or a random
+    overwrite chosen in a two-action dialog.
+  - A terminal round robin with the wrong round count offers a confirmed, atomic resize-and-draw.
+  - "Clear round-robin draw" removes all stage pairings (byes included) when no game has a result, and keeps the
+    numbers as drafts. If nothing else remains, Settings unlocks again.
+  - Any entered game result locks round-robin generation and clearing until every result is removed.
 - **Joining rounds (0001):** every participant has a "joins from round" value, with a sensible default and backfill
   to round 1. Rounds before it are neither pairable nor skipped rounds. Round-robin admission rules are enforced,
   and "finalize all" finalizes the eligible players and reports skipped ones with reasons.
@@ -45,7 +55,7 @@ and reviewed; this version contains the review corrections and awaits re-review.
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **107 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **124 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
@@ -67,10 +77,23 @@ and reviewed; this version contains the review corrections and awaits re-review.
   the monotonic Settings lock after deleting all pairings and reloading, unplayed colour swaps restored only after
   confirmation, credited byes as outcomes (joining default, stage barrier, delete confirmation, generator
   conflict), and fixture byes kept on regeneration. Re-review: the lock is kept for a stored pre-0001 tournament after
-  its last pairing is deleted (API test with an authentic pre-0001 JSON document).
-- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **14 passed, 0 failed**
+  its last pairing is deleted (API test with an authentic pre-0001 JSON document). Spec 0002 (`Spec0002Tests` plus an
+  API test):
+  - field availability; partial and duplicate drafts with structured errors and zero writes;
+  - batch atomicity and card/table rule parity; a manual permutation defining the frozen order;
+  - random overwrite with inactive drafts untouched; frozen 0001 numbers and no auto-numbering;
+  - the round-count prompt (8 players, 5 → 7 rounds) with atomic resize; safe and blocked shrinking; odd rosters and
+    round-robin prefixes;
+  - atomicity across confirmations; Clear of all stage pairings (manual, protected, byes) without touching later
+    stages;
+  - drafts kept after Clear; the result lock lifecycle (referee and unknown results, unlock after removal, byes never
+    lock); the single-stage Settings unlock versus individual deletion and multi-stage Clear;
+  - starting numbers in the export report;
+  - the API lifecycle: numbers → prompt → resize → lock → clear → unlock.
+- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **17 passed, 0 failed**
   (including participation markers before the joining round, locked roster rounds, and the pairing editor sending
-  the confirmation flag when a credited bye is deleted).
+  the confirmation flag when a credited bye is deleted). Spec 0002: the number-source dialog before the round-count
+  dialog, a single final request, cancel sending nothing, and one batch request for several table edits.
   Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
   Russian-only letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback. Component
   test (jsdom): the settings form prompts before in-app navigation discards unsaved changes, and does not prompt
@@ -87,7 +110,16 @@ and reviewed; this version contains the review corrections and awaits re-review.
   score group, then rating. No page errors. Review corrections were checked in the running app: a late entrant shows
   "not yet joined" markers, a roster member has locked availability in round-robin rounds, and the Settings system
   stays locked after all pairings are deleted. Re-review: deleting a credited bye in the pairing editor (uk and en)
-  shows the bye-specific warning and succeeds after confirmation.
+  shows the bye-specific warning and succeeds after confirmation. Spec 0002, on a disposable instance (uk and en):
+  - a disabled inactive row; Generate disabled while table edits are unsaved;
+  - the error summary (duplicate, out of range, gaps) with highlighted rows; the "change to 7 rounds" dialog, then 7
+    drawn rounds with read-only numbers;
+  - a read-only card number; the lock after a result, its hint, and the unlock after removal;
+  - Clear (28 pairings) with drafts kept, editable again, and Settings unlocked;
+  - the random-overwrite choice: cancel keeps drafts, overwrite freezes a random order with the inactive draft
+    untouched.
+
+  No page errors.
 
 ## Known limitations
 
@@ -116,11 +148,11 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Final re-review of the spec 0001 corrections (see the review log).
-2. Referee demo of the round-robin and stage-change flows. Collect answers to the open questions in
+1. Independent review of the spec 0002 implementation.
+2. Redeploy the live container when the owner asks.
+3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
-3. Spec 0001 for the next scope (likely candidates: bye and skipped-round scoring, automatic Swiss/McMahon
-   pairing).
+4. Next specs (likely candidates: automatic Swiss/McMahon pairing, skipped-round scoring).
 
 ## Review log
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Current state as of spec 0001. Keep this document in sync with the code.
+Current state as of spec 0002. Keep this document in sync with the code.
 
 ## Components
 
@@ -29,13 +29,17 @@ In production, one container serves the compiled SPA (`wwwroot`) and the API on 
 - `GET/POST /api/tournaments`, `POST /api/tournaments/import` (multipart `file`), `GET/DELETE /api/tournaments/{id}`
 - `PUT …/settings`, `PUT …/round` (current round + include flag), `GET …/standings`, `GET …/standings/preparation`
 - `POST …/stages` `{ startRound, system, confirmDeleteUnplayed }`: change the pairing system starting from a round
-- `POST …/rounds/{n}/generate` `{ allRounds, randomStartingNumbers, confirmReplace }`: round-robin generation
+- `POST …/rounds/{n}/generate` `{ allRounds, source: "entered" | "random", confirmReplace, roundCount }`: round-robin
+  generation. `roundCount` carries a confirmed round-count adjustment (spec 0002).
+- `POST …/rounds/{n}/clear-round-robin` `{ confirm }`: clear the round-robin draw. `confirm=false` is a preflight that
+  answers 409 `clear.confirm` with the counts.
+- `PUT …/starting-numbers` `{ entries: [{ participantId, number }] }`: atomic batch save of draft starting numbers.
 - `POST/PUT/DELETE …/participants[/{pid}]`, `POST …/participants/finalize-preliminary`, `…/delete-preliminary`
 - `POST …/rounds/{n}/pairings`, `PUT/DELETE …/pairings/{pid}[?confirmDiscardResult=true]`
 - `GET …/export-report`, `GET …/export.xml`
 - `GET /api/catalog?search=`, `GET/POST …/catalog-upsert`
 
-Every mutation returns the full updated tournament view (plus `systemLocked` and `defaultJoinRound`), so the UI simply replaces its state. Errors are
+Every mutation returns the full updated tournament view (plus `systemLocked`, `defaultJoinRound` and the round-robin read model `roundRobin`: numbers, eligibility, frozen state, result lock), so the UI simply replaces its state. Errors are
 `{ code, args }` with status 400 (validation), 404, or 409 (conflict or confirmation needed). The UI translates
 `error.<code>`.
 
@@ -63,7 +67,9 @@ cannot add it without a CORS preflight, and the server never approves preflights
   system, and the stage is persisted on the next save.
 - `Participant`: tournament-local snapshot. `Id` is the local legacy ID that pairings reference. The optional
   `CatalogEntryId` points to the catalog. Catalog edits never change existing tournaments. `FirstEligibleRound`
-  (default 1) is the joining round; earlier rounds are neither skipped rounds nor pairable.
+  (default 1) is the joining round; earlier rounds are neither skipped rounds nor pairable. `StartingNumber` is the
+  draft round-robin starting number (spec 0002): editable before the draw, kept for inactive players, never copied to
+  the catalog. Once drawn, the stage's `FrozenRosterIds` order is canonical.
 - `Round` → `Pairing` (black/white IDs, bye flag, board, result, protection, handicap/komi, comment).
 - Standings are **derived** on every request from pairings and results; they are never stored.
 - Enforced rules: a player appears at most once per round; board numbers are unique per round; a new assignment
@@ -81,6 +87,18 @@ cannot add it without a CORS preflight, and the server never approves preflights
   - Admitting a player (adding or finalizing) while a round robin is frozen requires a joining round after that
     stage. Before the draw, round-robin entrants must join at the stage start.
   - Round-robin rounds have no manual protection.
+- Spec 0002 rules:
+  - **Result lock:** any two-player pairing with an entered result in the round-robin stage blocks both generation
+    and Clear; byes never lock. The lock is derived from current data, so removing every result releases it.
+  - **Starting numbers:** a first draw uses either the entered numbers (exactly 1..N among the N eligible players,
+    otherwise a structured `generate.startingNumbersInvalid` error) or one random permutation that overwrites the
+    eligible players' drafts. There is no implicit registration order.
+  - **Round count:** a terminal round-robin stage whose total round count differs from one cycle answers 409
+    `generate.roundCountAdjustment`. The confirmed `roundCount` resizes and draws in one mutation. Shrinking is refused
+    while the trimmed rounds hold pairings, stage starts, joining rounds or availability marks.
+  - **Clear:** removes every pairing of the stage (games, byes, manual, protected), unfreezes the roster, and keeps the
+    last numbers as drafts. Only when the tournament is left with one stage and no pairings does it reset
+    `PairingsEverDrawn` (the sole exception to the monotonic Settings lock).
 
 ## Standings calculation
 

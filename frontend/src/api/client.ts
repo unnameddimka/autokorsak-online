@@ -1,5 +1,5 @@
 import type {
-  CatalogEntry, Preparation, TournamentSystem, ExportReport, PairingInput, ParticipantInput, SettingsInput, Standings, TournamentSummary,
+  CatalogEntry, Preparation, StartingNumberSource, TournamentSystem, ExportReport, PairingInput, ParticipantInput, SettingsInput, Standings, TournamentSummary,
   TournamentView, UpsertDecision, UpsertPlan,
 } from './types';
 
@@ -31,10 +31,17 @@ export const saveStatus = {
 
 // ---------- transport ----------
 
+/** 409 answers that only ask the referee to confirm: nothing was attempted, so they are not save failures. */
+const CONFIRMATION_REQUESTS = new Set([
+  'clear.confirm', 'generate.roundCountAdjustment', 'generate.replaceUnplayed', 'pairing.resultWouldBeDiscarded',
+  'stage.unplayedPairingsWillBeDeleted',
+]);
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const mutating = method !== 'GET';
   if (mutating) setSaveState({ ...saveState, pending: saveState.pending + 1 });
   let ok = false;
+  let confirmationRequest = false;
   try {
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (mutating) headers['X-AutoKorsak-Client'] = '1';
@@ -56,6 +63,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON error page */ }
     if (!response.ok) {
       const err = json as { code?: string; args?: Record<string, unknown> } | null;
+      confirmationRequest = response.status === 409 && CONFIRMATION_REQUESTS.has(err?.code ?? '');
       throw new ApiError(err?.code ?? 'server.error', err?.args ?? {}, response.status);
     }
     ok = true;
@@ -64,7 +72,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     if (mutating) {
       setSaveState({
         pending: Math.max(0, saveState.pending - 1),
-        failed: !ok,
+        failed: confirmationRequest ? saveState.failed : !ok,
         lastSavedAt: ok ? Date.now() : saveState.lastSavedAt,
       });
     }
@@ -91,8 +99,12 @@ export const api = {
   preparation: (id: string) => request<Preparation>('GET', `${t(id)}/standings/preparation`),
   changeSystem: (id: string, startRound: number, system: TournamentSystem, confirmDeleteUnplayed = false) =>
     request<TournamentView>('POST', `${t(id)}/stages`, { startRound, system, confirmDeleteUnplayed }),
-  generate: (id: string, round: number, options: { allRounds: boolean; randomStartingNumbers: boolean; confirmReplace?: boolean }) =>
-    request<TournamentView>('POST', `${t(id)}/rounds/${round}/generate`, { confirmReplace: false, ...options }),
+  generate: (id: string, round: number, options: { allRounds: boolean; source: StartingNumberSource; confirmReplace?: boolean; roundCount?: number | null }) =>
+    request<TournamentView>('POST', `${t(id)}/rounds/${round}/generate`, { confirmReplace: false, roundCount: null, ...options }),
+  clearRoundRobin: (id: string, round: number, confirm: boolean) =>
+    request<TournamentView>('POST', `${t(id)}/rounds/${round}/clear-round-robin`, { confirm }),
+  saveStartingNumbers: (id: string, entries: { participantId: number; number: number | null }[]) =>
+    request<TournamentView>('PUT', `${t(id)}/starting-numbers`, { entries }),
 
   addParticipant: (id: string, input: ParticipantInput) => request<TournamentView>('POST', `${t(id)}/participants`, input),
   updateParticipant: (id: string, pid: number, input: ParticipantInput) =>

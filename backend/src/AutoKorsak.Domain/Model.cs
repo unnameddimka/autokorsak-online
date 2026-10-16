@@ -191,6 +191,12 @@ public sealed class Participant
     public int StartScore { get; set; }
 
     public bool Preliminary { get; set; }
+    /// <summary>
+    /// Draft round-robin starting number (spec 0002 §2). Editable before the draw; once drawn, the stage's frozen roster
+    /// order is canonical. Kept when the player is inactive; never copied to the shared catalog.
+    /// </summary>
+    public int? StartingNumber { get; set; }
+
     /// <summary>First round in which the participant takes part (spec 0001 §2.2). Earlier rounds are not skipped rounds.</summary>
     public int FirstEligibleRound { get; set; } = 1;
     public List<int> NotPlayingRounds { get; set; } = [];
