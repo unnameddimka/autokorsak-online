@@ -70,18 +70,57 @@ public class StandingsTests
         Assert.Contains(StandingsCalculator.NoticeByes, s.Notices);
     }
 
+    // Explicit absence vs. ordinary missing pairing (re-review of bfe922c8).
+
     [Fact]
-    public void Empty_rounds_awaiting_pairing_raise_no_skipped_round_notice()
+    public void Explicit_absence_in_a_counted_round_without_pairings_raises_skipped_round_notice()
+    {
+        var t = TournamentEditor.Create(Settings("Absent", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        TournamentEditor.AddParticipant(t, Player("A"));
+        TournamentEditor.AddParticipant(t, Player("B"));
+        TournamentEditor.AddParticipant(t, Player("C") with { NotPlayingRounds = [1] });
+        Assert.Contains(StandingsCalculator.NoticeSkippedRounds, StandingsCalculator.Calculate(t).Notices);
+    }
+
+    [Fact]
+    public void Explicit_absence_with_unplayed_pairings_raises_skipped_round_notice()
+    {
+        var t = TournamentEditor.Create(Settings("Absent", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        var a = TournamentEditor.AddParticipant(t, Player("A"));
+        var b = TournamentEditor.AddParticipant(t, Player("B"));
+        TournamentEditor.AddParticipant(t, Player("C") with { NotPlayingRounds = [1] });
+        TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id)); // result still unset
+        var notices = StandingsCalculator.Calculate(t).Notices;
+        Assert.Contains(StandingsCalculator.NoticeSkippedRounds, notices);
+        Assert.Single(notices, StandingsCalculator.NoticeSkippedRounds); // deduplicated
+    }
+
+    [Fact]
+    public void Available_unpaired_players_in_an_unplayed_round_raise_no_skipped_round_notice()
     {
         var t = TournamentEditor.Create(Settings("Fresh", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
         var a = TournamentEditor.AddParticipant(t, Player("A"));
         var b = TournamentEditor.AddParticipant(t, Player("B"));
-        TournamentEditor.AddParticipant(t, Player("C") with { NotPlayingRounds = [1] });
+        TournamentEditor.AddParticipant(t, Player("C"));
         Assert.Empty(StandingsCalculator.Calculate(t).Notices);
 
-        // Pairings without results: the round is still in progress, not a skipped-round situation.
-        TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id));
+        TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id)); // C unpaired, no results yet
         Assert.DoesNotContain(StandingsCalculator.NoticeSkippedRounds, StandingsCalculator.Calculate(t).Notices);
+    }
+
+    [Fact]
+    public void Explicit_absence_in_an_excluded_current_round_raises_no_skipped_round_notice()
+    {
+        var t = TournamentEditor.Create(Settings("Excluded", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        TournamentEditor.AddParticipant(t, Player("A"));
+        TournamentEditor.AddParticipant(t, Player("B"));
+        TournamentEditor.AddParticipant(t, Player("C") with { NotPlayingRounds = [1] });
+        TournamentEditor.SetCurrentRound(t, 1, includeCurrentRound: false);
+
+        var result = StandingsCalculator.Calculate(t);
+
+        Assert.Empty(result.CountedRounds);
+        Assert.DoesNotContain(StandingsCalculator.NoticeSkippedRounds, result.Notices);
     }
 
     [Fact]

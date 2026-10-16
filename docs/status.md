@@ -1,8 +1,8 @@
 # Status
 
 **Current version:** spec 0000 (functional UI prototype), 2026-10-16. The first implementation (`0cc16168`) has been
-reviewed; this version contains the review corrections and awaits independent re-review before P0 is called
-complete. The first referee demo follows.
+reviewed and its corrections (`bfe922c8`) accepted on re-review. This version also fixes the one remaining re-review
+P2 and awaits a final re-review before P0 is called complete. The first referee demo follows.
 
 ## What works
 
@@ -32,7 +32,7 @@ complete. The first referee demo follows.
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **61 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **64 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
@@ -40,7 +40,7 @@ complete. The first referee demo follows.
   systems; export limitations; malformed XML, XXE, duplicate IDs, missing references, excessive depth; editing
   rules (double assignment, board uniqueness, preliminary players, availability, no silent game loss, bulk
   delete, round shrink, paired player cannot become preliminary, game → bye conversion, editing imported byes);
-  standings notices for empty versus played rounds; rejected invalid `NotPlayingInRound` values; catalog upsert and snapshot independence; API persistence, the import → edit → export →
+  standings notices for explicit absences, empty, unplayed and played rounds, and excluded rounds; rejected invalid `NotPlayingInRound` values; catalog upsert and snapshot independence; API persistence, the import → edit → export →
   reimport flow, the CSRF header, and that no legacy XML is leaked to the browser.
 - Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **10 passed, 0 failed**.
   Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
@@ -85,4 +85,5 @@ assistant wizard, authentication, other board games, SORP result points.
 
 | Date | Reviewer | Commit | Findings | Resolution |
 |---|---|---|---|---|
-| 2026-10-16 | GPT-6 | `0cc16168` | 2× P1 (paired player → preliminary; game → bye kept its result), 4× P2 (false skipped-round notice, unsaved settings lost on navigation, Players list missing country/team/coach, invalid `NotPlayingInRound` silently dropped). Architecture accepted. | All six fixed with regression tests; see [review/0000-review-gpt6-0cc16168-response.md](review/0000-review-gpt6-0cc16168-response.md). Awaiting re-review. |
+| 2026-10-16 | GPT-6 | `0cc16168` | 2× P1 (paired player → preliminary; game → bye kept its result), 4× P2 (false skipped-round notice, unsaved settings lost on navigation, Players list missing country/team/coach, invalid `NotPlayingInRound` silently dropped). Architecture accepted. | All six fixed with regression tests; see [review/0000-review-gpt6-0cc16168-response.md](review/0000-review-gpt6-0cc16168-response.md). Accepted on re-review ([review/0000-rereview-gpt6-bfe922c8.md](review/0000-rereview-gpt6-bfe922c8.md)). |
+| 2026-10-16 | GPT-6 (re-review) | `bfe922c8` | All six previous findings closed. 1× P2: an explicit absence (`NotPlayingRounds`) in a counted round raised no skipped-round notice before any result existed. | Fixed with 4 regression tests; see [review/0000-rereview-gpt6-bfe922c8-response.md](review/0000-rereview-gpt6-bfe922c8-response.md). Awaiting final re-review. |

@@ -94,8 +94,9 @@ public static class StandingsCalculator
             }
         }
 
-        // A round counts as "being played" once any of its games has a result. Only then does a player without a
-        // game there have a skipped round; an empty or not-yet-played round is simply awaiting pairings/results.
+        // An explicit absence (NotPlayingRounds) in a counted round is always a skipped round. An available but
+        // unpaired player only has one once the round is being played (any game has a result); before that the
+        // round is simply awaiting pairings/results.
         var playedRounds = t.Rounds
             .Where(r => r.Pairings.Any(p => !p.IsBye && p.Result != GameResult.Unset))
             .Select(r => r.Number)
@@ -105,7 +106,8 @@ public static class StandingsCalculator
             {
                 var notPlaying = !participant.PlaysInRound(r);
                 cells[participant.Id][r] = new RoundCell(r, notPlaying ? CellKind.NotPlaying : CellKind.None);
-                if (counted.Contains(r) && playedRounds.Contains(r) && !participant.Preliminary) notices.Add(NoticeSkippedRounds);
+                if (counted.Contains(r) && !participant.Preliminary && (notPlaying || playedRounds.Contains(r)))
+                    notices.Add(NoticeSkippedRounds);
             }
 
         var points = ids.ToDictionary(id => id, id => games[id].Sum(g => g.OwnScore));
