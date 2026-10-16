@@ -1,6 +1,6 @@
 # 0000 — AutoKorsak Online: Functional UI Prototype
 
-**Status:** Proposed canonical specification for initial implementation  
+**Status:** Approved (2026-10-16) — canonical specification for initial implementation  
 **Priority:** P0 — deliver a usable, containerized website for an early review with the tournament referee  
 **Canonical specification language:** **English**  
 **Product interface languages:** **Ukrainian (`uk-UA`) and English (`en`) only**  

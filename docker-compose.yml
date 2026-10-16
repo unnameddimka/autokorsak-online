@@ -1,0 +1,41 @@
+services:
+  app:
+    build: .
+    image: autokorsak-online:local
+    # Local-only prototype without authentication: never bind to a public interface.
+    ports:
+      - "127.0.0.1:${AUTOKORSAK_PORT:-8080}:8080"
+    volumes:
+      - autokorsak-data:/data
+    restart: unless-stopped
+
+  # Test runners (not started by `docker compose up`):
+  #   docker compose --profile test run --rm backend-tests
+  #   docker compose --profile test run --rm frontend-tests
+  backend-tests:
+    profiles: [test]
+    image: mcr.microsoft.com/dotnet/sdk:10.0
+    working_dir: /repo/backend
+    environment:
+      AUTOKORSAK_REPO_ROOT: /repo
+    volumes:
+      - .:/repo:ro
+      - nuget-cache:/root/.nuget/packages
+    command: ["dotnet", "test", "AutoKorsak.slnx", "--artifacts-path", "/tmp/artifacts", "--nologo", "--logger", "console;verbosity=normal"]
+
+  frontend-tests:
+    profiles: [test]
+    image: node:24-alpine
+    volumes:
+      - ./frontend:/repo/frontend:ro
+    command:
+      - sh
+      - -c
+      - >-
+        mkdir -p /work && cd /repo/frontend &&
+        tar cf - --exclude=node_modules --exclude=dist . | tar xf - -C /work &&
+        cd /work && npm ci --no-audit --no-fund && npx tsc --noEmit && npx vitest run
+
+volumes:
+  autokorsak-data:
+  nuget-cache:

@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AutoKorsak.Api/AutoKorsak.Api.csproj" />
+    <Project Path="src/AutoKorsak.Domain/AutoKorsak.Domain.csproj" />
+    <Project Path="src/AutoKorsak.LegacyXml/AutoKorsak.LegacyXml.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AutoKorsak.Tests/AutoKorsak.Tests.csproj" />
+  </Folder>
+</Solution>

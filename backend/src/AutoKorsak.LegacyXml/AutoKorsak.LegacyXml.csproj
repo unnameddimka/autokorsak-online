@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\new-tournament-template.xml" LogicalName="new-tournament-template.xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AutoKorsak.Domain\AutoKorsak.Domain.csproj" />
+  </ItemGroup>
+
+</Project>
