@@ -46,6 +46,8 @@ Old persisted tournaments without stages are interpreted as a single stage using
 
 The previously global Tournament.System field is **the most recently selected/current configured pairing system**, rather than "the method that necessarily governed every historical round" or "always the first stage". Update and persist it when the referee selects a new method for a stage. The stage sequence is the authoritative record of which method actually governs each round. This distinction also applies to legacy export (§6).
 
+**Settings behavior:** When the tournament has exactly one stage **and no pairing in that stage has been drawn yet**, the existing **Tournament system** selector remains editable and changes that initial stage's method (and the last-selected system) together. Once **any pairing has been drawn** in the first stage, or a second stage has been defined, the Settings selector is **read-only**; it displays the last selected system and directs the referee to **"Change pairing system starting from round..."** for subsequent changes. Neither a settings save nor a partial form update may silently change a historical stage. The Pairings screen separately shows the effective system of its **selected round**, which may differ from the last-selected system shown in Settings. This restriction applies to tournaments restored from disk or imported with existing pairings, not only to newly generated tournaments.
+
 ### 2.2. Single scoring history
 
 All completed games and awarded byes from all stages contribute to the same tournament standings according to the tournament's calculation settings. SOS, SODOS, SOSOS and future criteria use the continuous encounter history. Changing the pairing method never wipes earlier results, alters prior opponents or restarts the score tally.
@@ -54,16 +56,28 @@ For a later Swiss generator, all prior played RR matches are previous encounters
 
 A player's lack of participation **before their actual joining round** is not a skipped round and must not trigger skipped-round notices. The join date is stage-independent and persisted per participant (e.g. firstEligibleRound). This is necessary when a participant is added after the Swiss stage has already started.
 
+**Joining round applies to every tournament, not only mixed-system tournaments.** Existing stored/imported participants without this new field default to **round 1** for backward compatibility. For a newly added participant the proposed default is the **currently selected round if it has no recorded results**, otherwise the **next round**. Consider a result-bearing bye as a scored outcome; a round with only unplayed pairings has no recorded results. The referee may explicitly choose an allowed round from 1..NumberOfRounds, including round 1 when there is no frozen RR stage, to enter historical paper tournaments. The joining round does not retroactively rewrite actual games/results. Never auto-create an extra round if the current final round already has recorded results: the referee must first extend the tournament or use an existing valid round. If a stage rule disallows the proposed default, use the earliest permitted round **not earlier than actual admission** or require an explicit correction; never silently enroll a newcomer in an already frozen RR stage.
+
 ### 2.3. Fixed RR roster and later entrants
 
 - Capture the RR stage's finalized, eligible participant IDs and starting-number assignment atomically on the **first successful RR generation** (per-round or all-round).
 - The roster, its membership, and its order are frozen thereafter. Later edits to rating, names, or other participant attributes do not reorder starting numbers.
 - During an ongoing RR stage, new participants cannot be added to its frozen roster; changes to preliminary status/availability or deletion cannot silently invalidate frozen schedules or played games.
-- To admit new players, create a **later non-RR stage boundary first**. A player added after it may choose/receive a firstEligibleRound **at or after their actual joining round**, not automatically the startRound of an earlier already-progressing Swiss stage. Provide an explicit, understandable joining-round field/default in the participant editor and prevent retrospective assignment to earlier RR rounds.
+- To admit new players while an RR stage is already frozen, create a **later non-RR stage boundary first**. A new player's firstEligibleRound must fall within that later non-RR stage, **at or after the player's actual joining round**, not automatically at the stage's start. Expose and validate it in the participant editor and prevent retrospective assignment to earlier RR rounds. If no such future round exists, reject the addition with a translated, actionable error.
+- **Before the initial RR draw** (roster not frozen), any participant who will take part in that RR stage must have firstEligibleRound equal to **that stage's startRound**; no mid-cycle entry is permitted. A proposed joining-round default that lands later in that stage must be normalized to the stage start only when this represents genuine pre-draw registration, or the referee must explicitly change it. Once RR is frozen, none of its absent provisional players may become RR entrants.
 - A player joining at round 6 of a Swiss stage that began in round 4 is **not** treated as missing rounds 1–5.
 - A frozen RR member marked absent or unavailable for a scheduled round does not cause automatic reshuffling. Stop generation with an actionable localized error; the referee may handle withdrawal by recorded referee-decision results (§5.3).
 
-### 2.4. System change beginning at round K
+### 2.4. Finalizing preliminary registrations
+
+Finalizing a preliminary participant who was **not included in a frozen RR roster** is an **admission of a new participant** for joining-round purposes, whether performed individually or in a batch. It must not make the player newly eligible inside the frozen RR stage.
+
+- When a later non-RR stage exists, finalization is allowed with firstEligibleRound in that stage, no earlier than the player's actual joining round; select or confirm an appropriate valid round in the UI. If none exists, reject individual finalization with a localized explanation that the referee must configure a subsequent pairing-system stage.
+- Before the first RR draw, a preliminary participant can be finalized for that RR stage only when the roster is still mutable and their firstEligibleRound is the RR stage's startRound.
+- **Finalize all preliminary** becomes a **partial-success batch operation**: finalize every eligible preliminary participant, leave invalid ones preliminary, and return their IDs/names **and reasons** so the UI explicitly reports which were skipped. Do not treat an invalid entry as permission to mutate a frozen roster. If no participant is eligible, return a clear no-op report; do not claim all were finalized.
+- Preserve existing validation for players already paired in imported data; do not delete or change their historical results during finalization. A batch applies accepted changes atomically and reports rejected entries separately.
+
+### 2.5. System change beginning at round K
 
 Expose **"Change pairing system starting from round..."** with target round K and next system. The supported scenario in this spec is **RR → Swiss**, while automatic Swiss pairing remains disabled. A change to McMahon/Scheveningen may be stored but must not imply an implemented generator. A subsequent RR stage is not supported yet.
 
@@ -242,6 +256,10 @@ Compute this projection in the domain/backend so later Swiss and McMahon algorit
 16. Pre-0001 persisted JSON loads without mutation of historical pairings. An unidentified imported stage remains unknown until expressly changed.
 17. Standings checkbox OFF produces the old order and places; ON groups by **pre-round points**, then rating regardless of SOS/SODOS, and ignores results in current/later rounds. Restoring OFF restores official standings.
 18. McMahon preparation group uses stored StartScore plus previous-game score and byes, without implying unsupported general McMahon calculations.
+19. Single stage with no drawn pairings: Settings system selector updates both stage and last-selected system. Any drawn pairing or second stage makes it read-only; direct API settings updates cannot bypass the restriction. The Pairings view resolves the selected round's stage method.
+20. Old players with no joining-round property default to round 1. Newly added players in ordinary tournaments default to the current result-free round or the next round if results exist; explicit allowed backfill to round 1 works; no phantom round is created after a completed last round.
+21. RR stages enforce start-round eligibility for entrants before the freeze and disallow mid-cycle admission afterward; a new player joining the Swiss stage at its round 6 is not considered present in rounds 1–5.
+22. Individual preliminary finalization inside a frozen RR stage is rejected unless the player can join a subsequent non-RR stage. Batch finalization commits eligible players, skips ineligible ones, and returns per-player localized-reason data, including the all-skipped case. Historical played games remain untouched.
 
 ### 8.2. Frontend and referee flows
 
@@ -251,6 +269,9 @@ Compute this projection in the domain/backend so later Swiss and McMahon algorit
 - Referee swaps colours on a game, records the result, and re-runs generate all: that played game stays byte-for-byte unchanged.
 - Referee records a withdrawal-related technical result using **"Result by referee decision"**; the flag remains set.
 - Referee transitions from RR rounds 1–3 to Swiss from 4, adds a player joining at round 6, and observes unchanged historical standings and correct pre-round grouping.
+- Tournament system is editable in Settings before any pairing is drawn in the sole stage; after a pairing exists or a second stage exists it is read-only and points to stage change, while Pairings identifies the selected round's actual system.
+- A new participant defaults to the current round if still unplayed, otherwise the next round, with appropriate corrections for RR freezes and end-of-tournament conditions; the referee may deliberately backfill a non-frozen tournament to round 1.
+- Individual and batch preliminary finalization do not admit a participant into a frozen RR stage; batch finalization reports explicitly skipped players and reasons.
 - UI indicates the current round's effective method. Unsupported Swiss/McMahon/Scheveningen automatic generators remain disabled.
 - Both Standings modes, new confirmations, and warnings work in uk-UA and en, with localization-key parity.
 
