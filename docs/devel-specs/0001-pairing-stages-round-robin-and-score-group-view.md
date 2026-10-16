@@ -2,202 +2,262 @@
 
 **Status: Proposed**  
 **Date:** 2026-10-16  
-**Basis:** Implemented specification 0000 and referee feedback (Yulia), confirmed by the owner.  
-**Languages:** Ukrainian (default) and English; no Russian interface strings.
+**Basis:** Spec 0000, referee feedback (Yulia), and subsequent owner clarifications on 2026-10-16.  
+**UI languages:** Ukrainian (default) and English only.
 
-## 1. Goal and product contract
+## 1. Scope and governing rules
 
-Implement the referee's first post-prototype requests:
+Deliver these referee-facing improvements:
 
-1. In **Standings**, offer an optional view that orders participants by their score group and then by rating, instead of using standings tie-break coefficients to order players.
-2. Implement deterministic **round-robin (Berger/circle-method) pairing** through the existing round-by-round pairing workflow, with an optional checkbox to generate the entire round-robin stage at once.
-3. Keep a round-robin stage's participant roster fixed once drawing begins, while allowing the referee to **change the pairing system from a later round**, e.g. rounds 1–3 round robin and rounds 4–7 Swiss with newly added participants.
-4. Keep **one continuous tournament**: previous games, results, points, opponents, and coefficients remain relevant after a pairing-system transition.
+1. A Standings checkbox to sort by **rating inside score groups**, independent of official tie-break criteria.
+2. Deterministic **single-cycle round-robin (Berger) pairing**, generating the selected round by default, with an option to generate all rounds of the current round-robin stage at once.
+3. A choice, **"Assign starting numbers randomly"**, available at the first round-robin draw. Unchecked means stable registration/participant-ID order; checked means randomized numbers. Either assignment is persisted and then immutable for that stage.
+4. A way to **change pairing method beginning with a specified future round** (initial supported journey: round robin, then Swiss). Earlier pairings and results survive, and new players may join from a later round.
+5. **One continuous tournament** across stage changes: previously earned points, wins, opponents, and tie-break coefficients are not reset.
+6. Score **every bye as one win / one tournament point**, regardless of the pairing system. A bye is a victory without a played game.
 
-A pairing system controls the creation of pairings. It must **not** partition the tournament into independent competitions or reset results.
+**Most important invariant:** A game with a recorded result is never modified, deleted, renumbered, recolored, or replaced by automatic pairing or a pairing-system change. No confirmation is sufficient to override this invariant. To change a played game, the referee must use the existing explicit manual editor; the generator must not change it.
 
-### Explicit exclusions
+### 1.1. Out of scope
 
-- Automatic Swiss, McMahon, and Scheveningen pairing algorithms. Their buttons remain disabled until those algorithms are specified and implemented.
-- A new bye-points policy, advanced skipped-round scoring, or full McMahon standings calculation.
-- External rating synchronization, catalog-upsert changes, authentication, and printing/reports.
-- Double or repeated round-robin cycles, dynamic re-optimization of a Berger schedule, and an algorithm for compensating an unavailable player.
-- Automatic legacy XML Kind-code discovery. Do not guess unknown legacy system codes.
-- An independent "fictitious bye player" in the participant catalog or tournament.
+- Automatic Swiss, McMahon, or Scheveningen pairing. Their generation controls remain unavailable until individually specified.
+- Automatic handicap allocation. Round-robin colours follow Berger, not handicap/strength; referees may manually change colours.
+- A separate tournament per stage, or separate stage-specific scoring tables.
+- Automatic forfeits, withdrawal-management workflow, and special skipped-round scoring.
+- Repeated/double round robins; dynamic re-optimization of the round-robin schedule after entry/withdrawal.
+- Creating a fake participant called "Bye".
+- Adding a new round-robin stage **after** a non-round-robin stage; changing or deleting an existing stage boundary. These can be specified later.
+- Guessing unknown legacy XML Kind codes or silently losing unsupported metadata.
 
-## 2. Independent concepts: tournament results versus pairing stages
+## 2. Pairing stages versus tournament scoring
 
-### 2.1. Pairing stages
+### 2.1. Persistent stages
 
-Introduce a persistent, ordered pairing-stage model. Each stage has, conceptually:
+Add a persistent ordered series of pairing stages. Conceptually, each stage contains:
 
-- **startRound**: inclusive first round, between 1 and tournament.NumberOfRounds.
-- **system**: the pairing method effective from that round; initially roundRobin, scheveningen, swiss, or mcMahon.
-- **frozenRosterIds**: for a round-robin stage, the ordered tournament-local participant IDs used by its fixed schedule, initially unset until the stage is first drawn.
+- startRound (inclusive, in 1..NumberOfRounds).
+- system: roundRobin, swiss, mcMahon, scheveningen, or an unidentified imported legacy system.
+- For RR only: frozenRosterIds, an **ordered** list of tournament-local participant IDs. Position in this list is the participant's Berger **starting number** (1-based).
+- For RR only: whether the starting numbers were initially assigned randomly; optional generation metadata as needed to make later requests reproducible.
 
-The stage ends immediately before the next stage's startRound, or at tournament.NumberOfRounds. There is exactly one effective stage per round. The initial/default stage starts in round 1 and derives its method from the existing tournament system. Existing persisted tournaments and imported legacy fixtures must remain readable without rewriting their pairings or source XML.
+The stage ends immediately before the next stage's startRound, or at the tournament's final round. Exactly one stage is effective for each round. The first stage starts at round 1. A later RR stage after Swiss/McMahon/Scheveningen is deferred in 0001.
 
-The global Tournament.System and its existing legacy mapping must remain compatible with older data. **Do not reinterpret it as the system of every historical round** after stage boundaries exist. For pairing operations, resolve the effective method from stages. Standings scoring and historical results remain global.
+Old persisted tournaments without stages are interpreted as a single stage using their current system, without changing participants, existing pairings, historical XML, or results. Imported tournaments with unrecognized legacy Kind have an unidentified first stage; automatic pairing for it stays disabled, but the referee can create a later supported stage.
 
-### 2.2. Player participation across a stage transition
+The previously global Tournament.System field is **the most recently selected/current configured pairing system**, rather than "the method that necessarily governed every historical round" or "always the first stage". Update and persist it when the referee selects a new method for a stage. The stage sequence is the authoritative record of which method actually governs each round. This distinction also applies to legacy export (§6).
 
-- Before the first round-robin draw, the eligible roster is finalized, non-preliminary tournament participants. Capture their IDs and **order** in frozenRosterIds on the successful first generation (the same atomic commit as the generated pairings).
-- Once frozen, later rating/name edits must not change the Berger seed order. No player may enter or leave that stage; do not silently regenerate a different tournament schedule when registration or participant count changes.
-- For new entrants after a transition, store a minimal **firstEligibleRound** or equivalent persistent joining-round fact. A player added for a Swiss/McMahon stage starting in round K must not be considered part of earlier round-robin rounds. Such players must not be falsely flagged as skipped in earlier rounds, paired retroactively there, or included when rebuilding the old Berger schedule.
-- An explicit future stage boundary must exist **before** a new participant is admitted in a way that would change a frozen round-robin stage. If there is no later stage, reject the operation with a localized actionable error; do not mutate the frozen roster.
-- Continue permitting ordinary participant metadata edits. Disallow changes to registration/availability or deletion when they would invalidate a frozen round-robin stage or its played pairings. Do not silently unpair anyone.
-- A player's round availability is not a request to replace a Berger opponent. If a frozen round-robin participant is unavailable in a requested round, stop generation with a localized conflict and no writes; the referee must resolve it explicitly.
+### 2.2. Single scoring history
 
-An implementation may use other storage shapes, but it must retain the stage method, stable Berger roster order, and joining-round semantics after restart.
+All completed games and awarded byes from all stages contribute to the same tournament standings according to the tournament's calculation settings. SOS, SODOS, SOSOS and future criteria use the continuous encounter history. Changing the pairing method never wipes earlier results, alters prior opponents or restarts the score tally.
 
-### 2.3. Changing the pairing system from round K
+For a later Swiss generator, all prior played RR matches are previous encounters for rematch avoidance. Precise Swiss/McMahon pairing rules are deferred; do not implement an approximate solver in 0001.
 
-Provide a referee action **"Change pairing system starting from round..."** (Ukrainian/English), selecting a round and the new method. The essential supported journey in 0001 is **round robin → Swiss**; transitioning to McMahon may be recorded, but its automatic pairing remains deferred. Do not imply Swiss/McMahon generation is available.
+A player's lack of participation **before their actual joining round** is not a skipped round and must not trigger skipped-round notices. The join date is stage-independent and persisted per participant (e.g. firstEligibleRound). This is necessary when a participant is added after the Swiss stage has already started.
 
-- Keep every earlier round, its actual pairings, results, colours, and history unchanged.
-- Future RR schedule slots no longer belong to the RR stage after the boundary. Unplayed/generated pairings in affected future rounds may be cleared only by explicit confirmation; **any existing recorded result in an affected round blocks the change**. No partial stage mutation on failure.
-- A transition cannot retroactively reassign completed rounds to another pairing method.
-- Newly added participants after the transition are eligible only from their declared joining round; they start with no prior game results. Existing participants carry all previous results.
-- For later Swiss/McMahon pairing, all prior tournament encounters remain in opponent history. A future Swiss generator will prefer avoiding rematches with earlier RR opponents, subject to its future separately specified rules.
-- Do not introduce separate tournaments, duplicate participants, or reset the standings on transition.
+### 2.3. Fixed RR roster and later entrants
 
-The UI must show the effective pairing system for the selected round and make stage boundaries comprehensible to the referee.
+- Capture the RR stage's finalized, eligible participant IDs and starting-number assignment atomically on the **first successful RR generation** (per-round or all-round).
+- The roster, its membership, and its order are frozen thereafter. Later edits to rating, names, or other participant attributes do not reorder starting numbers.
+- During an ongoing RR stage, new participants cannot be added to its frozen roster; changes to preliminary status/availability or deletion cannot silently invalidate frozen schedules or played games.
+- To admit new players, create a **later non-RR stage boundary first**. A player added after it may choose/receive a firstEligibleRound **at or after their actual joining round**, not automatically the startRound of an earlier already-progressing Swiss stage. Provide an explicit, understandable joining-round field/default in the participant editor and prevent retrospective assignment to earlier RR rounds.
+- A player joining at round 6 of a Swiss stage that began in round 4 is **not** treated as missing rounds 1–5.
+- A frozen RR member marked absent or unavailable for a scheduled round does not cause automatic reshuffling. Stop generation with an actionable localized error; the referee may handle withdrawal by recorded referee-decision results (§5.3).
 
-## 3. Round-robin generator
+### 2.4. System change beginning at round K
 
-### 3.1. Algorithm and stable schedule
+Expose **"Change pairing system starting from round..."** with target round K and next system. The supported scenario in this spec is **RR → Swiss**, while automatic Swiss pairing remains disabled. A change to McMahon/Scheveningen may be stored but must not imply an implemented generator. A subsequent RR stage is not supported yet.
 
-Use the standard deterministic single-cycle Berger/circle rotation applied to the stage's immutable ordered roster.
+- Preserve all rounds before K exactly, including their pairings, played/unplayed state, colours and recorded results.
+- Do not allow a retroactive change that reassigns completed rounds to a different method.
+- Existing unplayed pairings in rounds K..end may be deleted/replaced only after explicit confirmation; **any result-bearing pairing in affected rounds prevents the change altogether**. Check and apply atomically.
+- The stage history and last selected system are persisted; the currently displayed pairing method resolves from the stage covering the selected round.
+- Joining players become eligible from their firstEligibleRound and have no fictitious earlier games.
+- The old RR frozen roster and prefix of its Berger schedule remain intact.
+- Moving/removing an existing boundary, or switching back to RR after Swiss, is deferred; do not offer an enabled UI control for these operations.
 
-- For N players, each unordered pair meets **exactly once** over the full schedule.
-- Even N: N − 1 scheduling rounds, N/2 games per round.
-- Odd N: N scheduling rounds; add an internal empty rotation slot, yielding exactly **one bye per round** and exactly one bye for each participant across the full cycle.
-- A bye is an existing Pairing with IsBye=true and one real player. **Do not create a participant named "Bye".** Preserve the agreed existing visual treatment of byes as one-player pairings; do not add a new special board-number policy.
-- Pairings for a particular round must be reproducible in any request order (e.g. generate III before I) and after save/reload. First-round seeding follows a stable, explicitly persisted participant-ID order; it is **independent of the Standings rating-sort checkbox**.
-- Orient games as black/white deterministically, using a Berger-compatible balanced color schedule. On a full cycle, each player's total black/white count differs by at most one. Existing completed games are never recolored automatically.
-- Newly generated pairings have Unset result, no referee decision, and are **not manually protected** by default. Existing pairing IDs and recorded history must not be needlessly rewritten when the calculated fixture already matches.
+## 3. Round-robin pairing
 
-### 3.2. Schedule length and stage limits
+### 3.1. Fixed single-cycle Berger schedule
 
-A complete single RR cycle requires exactly N − 1 (even N) or N (odd N) rounds. If the tournament stays RR until its end, its configured round count must support that cycle; reject a mismatched configuration with a clear explanation rather than pretending that a truncated or repeated schedule is a complete RR tournament.
+Generate the standard deterministic Berger/circle-method fixture from the stage's frozen starting-number order.
 
-The referee may intentionally end an RR stage early by scheduling a later pairing-system transition. Such a stage uses only the prefix of the same fixed Berger cycle (e.g. three RR rounds before Swiss begins). No second RR cycle is inferred.
+- With N even, one complete cycle has N−1 rounds and N/2 games per round.
+- With N odd, one complete cycle has N rounds, (N−1)/2 actual games plus **one bye per round**, with exactly one bye per player across the cycle. An empty rotation slot may be used internally; it must not become a real participant.
+- All N(N−1)/2 unordered player pairs occur exactly once over a full cycle.
+- For each stage, fixture index starts at stage.startRound and never depends on which round the user generates first.
+- Pairing seed, starting numbers, colours, and bye positions must be reproducible after a process restart and in any generate-round order.
+- Orient colours according to a standard Berger colour table, with sensible near-balance verified by tests (difference no greater than one across a full cycle). **Do not alter generated colours based on ratings or the handicap setting.** The referee can use the ordinary manual pairing editor to swap colours when needed; a played game so changed remains immutable to generation.
+- Only valid tournament participants may appear. Bye uses the existing Pairing.IsBye representation and a single real player. Keep the agreed one-player-pair visual presentation and existing valid board-number conventions.
+- Generate regular pairings with Unset result, ResultByReferee=false, and Protected=false.
 
-For any generated round, compute the Berger schedule index relative to that stage's startRound, not the global tournament round number.
+### 3.2. Starting-number choice
 
-### 3.3. Per-round and all-round commands
+Before a stage's first successful generation show an unchecked checkbox:
 
-Reuse the existing **"Жеребкувати" / "Generate pairings"** action on the Pairings screen, operating on **only the selected round by default**.
+- **UA:** "Присвоїти стартові номери випадково"
+- **EN:** "Assign starting numbers randomly"
 
-When the selected round belongs to RR, display an unchecked checkbox:
+Unchecked: assign starting numbers deterministically in stable tournament-local participant-ID/registration order. **Not** by rating and **not** from the rating-within-score-groups viewing mode.
+
+Checked: take the same eligible roster and perform **one random permutation** of starting numbers. Persist that actual permutation, not just the checkbox or random seed. Present the assigned starting numbers to the referee in the pairing UI (at least the player→number mapping).
+
+The selection takes effect on **first successful generation** and is saved with the roster atomically. Generation failure or confirmation cancellation must not freeze or reshuffle the roster. All later generations reuse the saved assignment, regardless of the current checkbox value. Once frozen, disable/relabel the checkbox so that checking it again cannot produce a new draw. This is not a new per-round random draw.
+
+### 3.3. Stage length and check timing
+
+For RR continuing to the end of the tournament, require **exactly** N−1 (even N) or N (odd N) RR rounds. Extra rounds imply a later explicitly configured stage, not a second RR cycle. Too few rounds likewise fail if no later stage is configured.
+
+A referee may truncate the RR schedule deliberately by creating a later non-RR stage (e.g. three of seven rounds RR, then Swiss). Those RR rounds are the prefix of the single Berger fixture.
+
+**Validate schedule length when Generate is invoked, not while saving basic tournament settings**: during registration the referee may still be changing the number of participants/rounds. Validate a requested stage against its current start/end and frozen roster. Reject impossible or mismatched configurations with an actionable error, without any writes.
+
+### 3.4. One selected round versus all RR rounds
+
+Use the existing **"Жеребкувати" / "Generate pairings"** command. By default it generates the **selected round only**.
+
+When the selected round belongs to RR, offer an unchecked checkbox:
 
 - **UA:** "Жеребкувати всі тури"
 - **EN:** "Generate all round-robin rounds"
 
-If checked, generate or reconcile **all rounds of that RR stage**, bounded by the next stage (never touch future Swiss/McMahon rounds). The result must be identical to individually generating each RR round, regardless of order.
+When checked, generate/reconcile **every round within that RR stage**, not the entire tournament after a transition. Generating stage rounds individually in arbitrary order must produce exactly the same fixture as the all-round command.
 
-For any requested rounds:
+Before mutating anything:
 
-- Validate the frozen roster, round availability, stage limits, board uniqueness, pairing uniqueness, and all existing pairings **before writing anything**.
-- Existing compatible played pairings remain intact, including result, color, notes, and provenance.
-- If an existing played pairing conflicts with the deterministic fixture (players, bye or colours), fail atomically with a localized explanation; never discard a played result merely to regenerate.
-- Unplayed pairings that must be replaced may be replaced **only after a clear confirmation** showing the affected rounds/counts. A declined confirmation changes nothing.
-- Apply the entire request as one atomic tournament mutation, including multiple rounds. On validation failure nothing changes, including the previously unset frozen roster.
-- Repeating generation for an already valid target is idempotent and must not change pairing IDs or results unnecessarily.
+- Pre-compute the requested Berger fixtures, stage/roster changes and all conflicts.
+- Check eligible participants, fixed roster, round limits, duplicate players, unique boards, bye slots and stage boundaries.
+- A **played pairing is immutable** to the generator: keep its IDs, participants, colours, board, result, protection, referee-decision flag, handicap, komi, and comment exactly as stored.
+- A played pairing involving the **same two participants** as the prescribed Berger match is **compatible regardless of which player has Black or White**. Do not demand the generated orientation; do not swap it back.
+- A played pairing with different opponents or a mismatch in the bye assignment blocks the request; report the conflict and make **no changes anywhere**, including in other requested rounds. Never try to alter a played game to repair the fixture.
+- Already compatible unplayed pairings may be retained without needless ID churn. Incompatible unplayed pairings may only be replaced with a clear explicit confirmation listing affected rounds/counts. A declined confirmation changes nothing.
+- Apply the entire selected-round/all-stage request as **one atomic operation**. On error, no partial pairings, roster freezes, ID increments or stage mutations remain. Re-running an already-correct request is idempotent.
+- Never silently destroy unsaved referee data or lose legacy-retained information on replaced unplayed pairings: the confirmation must explain such loss where relevant.
 
-### 3.4. Manual protection in a round-robin stage
+### 3.5. No manual-protection mode in RR
 
-The referee explicitly requires that **"paired manually / protected pairing" not operate for RR**:
+The checkbox **"Жеребкування власноруч" / manual pairing protection (Protected)** must be hidden or disabled for RR rounds. The RR schedule is determined by starting numbers; it is not an optimization problem with protected manual anchors.
 
-- Hide or disable the Protected/Manual pairing checkbox while editing an RR round. Creating or generating RR pairings must not enable it.
-- The RR generator follows its fixed Berger schedule; the Protected flag is **not a reason to override or deform the schedule**.
-- Preserve imported historical Protected metadata if the historical pairing is otherwise left intact, but do not let that flag defeat RR regeneration on an unplayed round. Confirm replacement as in §3.3.
-- This is an explicit RR-only override of spec 0000's future protection rule. For non-RR algorithms, maintain the existing protected-pairing contract.
+- Creating or automatically generating an RR pairing never sets Protected=true.
+- For imported historical RR pairings, preserve their existing protection metadata if the pairing is kept, but the flag does not control Berger generation of unplayed pairings. Replacement still requires confirmation.
+- For non-RR rounds, existing manual-protection semantics stay in force for future pairing algorithms.
 
-The referee may still manually edit a result, comment, or game as allowed by existing validations. A subsequent regeneration must follow §3.3 and never silently erase those edits.
+Ordinary manual editing of games (including colour swap, result, comments) remains available. After a result is saved, no automatic generation operation may ever change that pairing.
 
-## 4. Standings checkbox: rating order within score groups
+## 4. Bye scoring: one point / one win for every system
 
-### 4.1. UI behavior
+Replace spec 0000's temporary "byes not scored" limitation **in the current standings calculator**:
 
-Add an unchecked checkbox to the **Standings** screen, independent of the tournament's persisted ranking-criteria configuration:
+- Every recorded bye yields **one win and exactly one tournament point** to its sole real participant, whether the stage is RR, Swiss, McMahon or Scheveningen. It is a **victory without a played game**.
+- Do **not** add a fake opponent, a played match, a referee-decision result or any second point for the bye. Bye is represented by IsBye, not by setting a two-player result.
+- Bye contributes nothing as an opponent to SOS/SODOS/SOSOS: there is no opponent. However, the awarded point participates in **the receiving player's overall score**, and therefore affects SOS/SODOS/SOSOS of genuine opponents exactly as any other earned point would.
+- Display the awarded bye as a bye / +1 in round cells and the player's total wins/score. The old "byes not scored" warning must no longer appear for a successfully scored bye of **any system**.
+- No new special skipped-round or other result-type scoring is implied. Continue to give notices for truly unsupported cases, not for a standard bye.
+- Import existing legacy byes into the same calculation; keep legacy XML structure unchanged.
+
+## 5. Referee operations and withdrawal
+
+### 5.1. Continuity and round availability
+
+Every pairing, result and bye belongs to the single tournament; the effective round's pairing system only controls generation. A participant cannot be assigned to multiple pairings in one round. The existing rule that a preliminary or unavailable player cannot receive a **new** manual pairing continues, subject to frozen RR-roster consistency.
+
+The generation UI must clearly label the effective system and whether the current RR stage's starting numbers are frozen. A non-RR selected round with no supported generator must keep the disabled/unavailable action; do not claim Swiss generation works.
+
+### 5.2. Handicap and colours
+
+No handicap algorithm in 0001. RR pairs follow Berger colour orientation, even if tournament handicap settings are enabled. Existing manual handicap and colour editing remain available; never normalize a manually changed **played** game back to Berger.
+
+### 5.3. Player withdrawing during RR
+
+A withdrawal does **not** delete or reshuffle a player in an already frozen RR stage. Existing schedule entries remain. The referee may manually assign a technical win/loss for the affected two-player games using the already implemented result editor.
+
+For **every technical result awarded due to withdrawal**, the referee explicitly checks **"Result by referee decision" / "Результат за рішенням судді"** (existing ResultByReferee field). Make this field available and understandable in this flow. Preserve it on save, reload, XML round-trip (where mapped), standings, and subsequent generation. A played referee-decided game remains immutable to auto-pairing. There is **no automatic withdrawal detection or mass-award button** in this spec.
+
+## 6. XML compatibility and application save semantics
+
+There is an unresolved legacy-format limitation: only **Swiss Kind=2** is verified. RR, McMahon and Scheveningen Kind values are not proven and **must not be guessed**, including the tempting assumption RR Kind=0.
+
+The owner's decision for mixed-system tournaments is: **store/export the last selected pairing system as the tournament's current system**, rather than forcing the first-stage system onto the save.
+
+- Inside the application/SQLite, always persist **both**: (a) authoritative per-round stage history and RR roster/starting numbers/join rounds, (b) the latest selected configured pairing system. The latter must survive reload, including a transition from RR to Swiss.
+- For XML export, the single legacy Kind represents the **last selected pairing method**, not the historically first one. If that method has a **verified** Kind code (currently Swiss=2), export it, even when earlier rounds were round robin. Export the actual prior RR games/results/bye entries as ordinary historical round data.
+- Legacy XML cannot describe per-round pairing stages, frozen starting numbers, randomization metadata or join rounds. Explicitly report those **lost-on-XML-export limitations**; when the same XML is imported elsewhere, it must not be presented as a full-fidelity stage backup. When a lossless round trip is required, use the application's persistent tournament save.
+- If the last selected method has **no verified Kind code** (e.g. a pure RR tournament), continue blocking legacy XML export with an accurate localized error. Do **not** mislabel RR as Swiss just to create a file. Verifying RR Kind requires suitable actual legacy-format evidence in a later task.
+- Preserve current support for imported unknown Kind tokens and existing source XML as far as verified. Do not overwrite unknown historical fields without mapping evidence.
+- Newly persisted JSON fields must have backward-compatible defaults for pre-0001 databases; no existing pairing/participant/result may disappear in migration.
+
+Keep business rules in AutoKorsak.Domain, import/export mapping in AutoKorsak.LegacyXml, and thin HTTP mutations in AutoKorsak.Api. Pairing calculation and bye-score math must not be duplicated in React. Mutations use the existing serialized, transactional save mechanism. Add localized error codes and confirmations in Ukrainian and English.
+
+## 7. Standings view: sort by rating inside score groups
+
+### 7.1. Checkbox and official standings isolation
+
+On Standings add an unchecked checkbox:
 
 - **UA:** "Сортувати за рейтингом у межах очкових груп"
 - **EN:** "Sort by rating within score groups"
 
-**Unchecked:** preserve the existing official standings order (enabled competition criteria, including SOS/SODOS/SOSOS), official places/ties, and saved layout settings.
+**Unchecked:** unchanged official standings: saved criterion order, enabled tie-breaks (SOS/SODOS/SOSOS, where calculated), official places/shared ties, current-round inclusion switch and column layout.
 
-**Checked:** show a *pairing-preparation view* ordered by:
+**Checked:** a referee's **pairing preparation view**, ordered by:
 
-1. **Score-group total**, descending.
-2. Player rating, descending.
-3. Display name, ascending; then stable tournament-local participant ID.
+1. Score group total, descending.
+2. Starting participant rating, descending.
+3. Display name ascending, then local participant ID.
 
-Do not use SOS, SODOS, SOSOS, or any other standings tie-breaker **to break ties within a score group**. Make the selected mode clearly visible. Do not change persisted official placements, the enabled ranking criteria, player ratings, games, or the tournament system. A view-only preference may remain local to the frontend; no tournament data migration is required for the checkbox itself.
+Do not use SOS, SODOS, SOSOS or other competition tie-breaks to decide the order **within** a score group. No mutation of the tournament's rank criteria, official places, results, ratings or pairing seed. Remember this view preference **per tournament in the browser**, not as official data. Make the active preparation mode visible.
 
-### 4.2. Which score is used
+Show the calculated score group for each row. Do **not** present a view-sorted row ordinal as an official place. Round-cell opponent row references must use the newly displayed order when checkbox is checked. The ordinary official standings remain intact and can be restored immediately.
 
-The referee is preparing the selected round **R**. Therefore this view's score groups use **only results of rounds strictly before R**, irrespective of the separate existing "include current round in calculations" toggle. A result accidentally entered early for round R cannot change the draw-preparation order of that same round.
+### 7.2. Score used in the preparation view
 
-- For Swiss and round-robin contexts, use accumulated supported game points from earlier rounds.
-- For a McMahon context, use the player's stored McMahon start score **plus** supported game points from earlier rounds. This limited grouping use does not claim that the advanced McMahon standings or skipped-round calculations have been implemented.
-- For a mixed-system tournament, earlier rounds of *all* pairing methods contribute to the score group; switching methods must not reset the tally.
-- For a new entrant from round K, earlier absent/nonexistent rounds contribute no games and must not be interpreted as unsupported skipped rounds merely because the participant did not exist in that stage.
-- Byes and other outcomes whose scoring remains undefined under 0000 must not silently receive invented points. Surface the existing calculation-limitation notices as applicable; do not claim that provisional groups are exact when they depend on unsupported scoring.
+For selected round R, the pairing-preparation score is computed from **all earlier rounds < R** and ignores R and later rounds, regardless of the ordinary "include current round in calculations" switch. Do not let an already-entered result in R influence that round's pairing preparation.
 
-In checked mode, display each player's **pairing score-group value** explicitly. The row order/ordinal is not an official place: avoid labeling a newly sorted ordinal as a final place. Keep the official standings view and its place/tie semantics untouched. Opponent row-number references in round cells, if shown, must correspond to the order currently displayed; do not leave stale row-number links after sorting.
+- Swiss and RR: cumulative supported points/wins from earlier rounds, including **+1 for each bye**.
+- McMahon: StartScore plus cumulative supported earned points from earlier rounds, including byes. McMahon start scores are currently imported/stored, but not editable in the UI. Do not add start-score editing in 0001.
+- Mixed stages: every earlier round contributes, irrespective of the pairing method.
+- Players not yet eligible in earlier rounds: no fabricated absences or penalties; they have no previous played points.
+- Unresolved special-result or skipped-round calculations must still be signaled; do not invent their compensation.
 
-The backend/domain should expose or calculate this projection from authoritative game data; do not reproduce scoring business logic ad hoc in React. Future Swiss and McMahon generators must be able to reuse the same pre-round score-group contract.
+Compute this projection in the domain/backend so later Swiss and McMahon algorithms can reuse the same pre-round score-group contract. The preparation view is a **display/ordering feature**, not automatic Swiss or McMahon pairing.
 
-## 5. API, persistence, compatibility, and error handling
+## 8. Acceptance and regression tests
 
-- Keep the existing .NET Domain → API → React boundaries. Add a domain pairing-schedule component and thin API endpoint(s); no pairing algorithm in the browser.
-- Pairing generation and system transitions are validated domain mutations under the existing serialized atomic write mechanism. A failed action must not alter tournaments, rounds, pairing IDs, stage metadata, or catalog data.
-- Extend the persisted tournament JSON backwards-compatibly. Missing stage metadata in old saved tournaments implies a single initial stage with the original system. Retain the existing legacy XML source untouched.
-- Keep existing round-edit operations and imported historical pairings functional. Migrating old fixtures must not create or delete games.
-- The **legacy XML has no verified mapping for mixed pairing stages or stage-join metadata**. Preserve valid game results and pairings; report those app-only metadata limitations on export and do not fabricate Kind values. Continue applying the current export block when a Kind code is unverified.
-- Document new API contract(s), stage metadata, update restrictions, and incomplete scoring in architecture/status/decisions. Preserve the approved 0000 specification.
-- New errors and confirmations are localized in **uk** and **en** only. Use existing confirmation and reload/state-update patterns.
-- The proposed 0001 is **not implementation authorization** until the owner changes Status to Approved.
+### 8.1. Domain, API and persistence
 
-## 6. Acceptance tests
+1. Four-player RR: exactly 3 rounds, 2 games/round, 6 unique unordered pairs, correct Berger opponents and colour balance.
+2. Five-player RR: exactly 5 rounds, 2 games plus 1 bye per round; all 10 unique games; one bye per player; no fictional participant.
+3. Starting numbers: unchecked preserves deterministic ID/registration order; checked produces a valid unique random permutation (using a controlled source in tests). Persist actual mapping, not just an RNG seed or checkbox. Repeated generation, round-order variation and restart preserve it.
+4. Generate later RR round before earlier one; compare with all-round generation using same frozen seed. Equivalent opponents/colours/byes.
+5. RR terminal stage must have **exactly** N−1/N rounds; a three-round prefix with a later Swiss stage is valid. These checks fire at **generation**, not during registration/settings edits.
+6. Per-round generation affects only selected round; all-round generation affects exactly the RR stage. Repeating a correct generation does not create duplicates or replace unchanged pairing IDs.
+7. An existing **played** pairing that matches the Berger opponents with **swapped colours** is accepted and untouched, including all metadata. An existing played wrong-opponent or bye-incompatible pairing blocks the entire request with zero mutations, even when "generate all" is selected.
+8. Replacing incompatible unplayed pairings requires explicit confirmation; refusal is no-op. Any validation/confirmation failure is fully atomic, with no frozen roster or advanced pairing IDs.
+9. No RR pair is created as Protected; the RR manual-protection checkbox is disabled and imported protection cannot force an alternative Berger fixture. Non-RR manual-protection behavior remains unchanged.
+10. RR withdrawn player remains on the frozen schedule; manually awarded technical results have ResultByReferee=true and survive save/reload and any later generation unchanged.
+11. Bye gives **one win and one point in RR and Swiss alike**. Standings, pre-round group totals, and opponent SOS reflect the awarded point; no bye-unscored notice. SOS does not invent an opponent for the bye.
+12. RR to Swiss from round K: earlier completed rounds/colours/results remain untouched; latest selected method is persisted as Swiss; all earlier results remain part of global standings and encounter history; no Swiss generator becomes active.
+13. Later participant joining in round 6 of a Swiss stage that started at round 4 has no false absence/skipped-round notices in rounds 1–5. Earlier frozen RR roster remains unchanged.
+14. Any result-bearing game in affected rounds blocks stage transition; unplayed future pairings require confirmation before deletion. Later RR stage and boundary-removal controls are absent/disabled.
+15. Pure RR, with no verified Kind code, has a truthful blocked XML export. RR→Swiss mixed tournament with latest system Swiss exports **Kind=2** while reporting stage/starting-number/join-round metadata loss. Previous unedited XML fixtures still round-trip unchanged.
+16. Pre-0001 persisted JSON loads without mutation of historical pairings. An unidentified imported stage remains unknown until expressly changed.
+17. Standings checkbox OFF produces the old order and places; ON groups by **pre-round points**, then rating regardless of SOS/SODOS, and ignores results in current/later rounds. Restoring OFF restores official standings.
+18. McMahon preparation group uses stored StartScore plus previous-game score and byes, without implying unsupported general McMahon calculations.
 
-Minimum deterministic backend tests:
+### 8.2. Frontend and referee flows
 
-1. RR 4 players: 3 rounds, exactly 2 games per round, 6 unique unordered pairs, each player meets every other exactly once; colors balanced.
-2. RR 5 players: 5 rounds, exactly 2 games plus one single-player bye per round, exactly one bye for each player, and all 10 unique games; no fictitious participant is inserted.
-3. Generate rounds out of order, individually and then via the all-round checkbox/API: same fixture schedule as all-at-once generation; stable across reload.
-4. Generate an already-correct round again: no duplicate pairings, no unnecessary pairing-ID or result changes.
-5. An existing played compatible pairing remains exactly unchanged; an incompatible played pairing blocks the whole request with zero writes.
-6. An incompatible unplayed pairing requires affirmative confirmation for replacement; cancellation leaves all rounds unchanged. Atomicity also holds when one of several requested rounds fails.
-7. RR generation never grants manual Protected, while imported protection does not override the RR schedule. No change to existing non-RR protection rules.
-8. After the RR roster is frozen, adding a participant to that same RR stage or invalidating a member's eligibility is refused. A future Swiss stage can admit a new participant without altering the frozen RR schedule.
-9. RR rounds 1–3, Swiss from round 4: stage boundary and historical results persist across restart; changing the stage never rewrites played rounds; unsupported Swiss generation remains disabled.
-10. All-round RR generation stops at the RR stage boundary and does not create Swiss pairings.
-11. New Swiss-stage entrants do not trigger a false skipped-round notice in earlier RR rounds. Prior RR results still contribute to subsequent tournament totals and opponent history.
-12. Normal Standings view is byte-for-byte equivalent in ranking/places to the previous implementation when the new checkbox is off.
-13. Preparation view for round R ignores results from R and later; same pre-round points with different SOS/SODOS but different ratings sorts by **rating**, not coefficients.
-14. McMahon pairing-preparation group calculation includes StartScore plus previously recorded supported results; explicitly warn where unsupported outcome scoring prevents a definitive answer.
-15. Legacy XML unedited fixtures still round-trip unchanged, and no unsupported stage metadata is silently claimed as serializable.
+- Referee selects RR, sees the two distinct checkboxes (**assign starting numbers randomly** before the initial draw; **generate all rounds** on a generate request).
+- First draw freezes and shows starting numbers. Subsequent requests cannot redraw numbers inadvertently.
+- A five-player RR visibly has byes and each bye is reflected as **+1** in standings, without an unsupported-bye warning.
+- Referee swaps colours on a game, records the result, and re-runs generate all: that played game stays byte-for-byte unchanged.
+- Referee records a withdrawal-related technical result using **"Result by referee decision"**; the flag remains set.
+- Referee transitions from RR rounds 1–3 to Swiss from 4, adds a player joining at round 6, and observes unchanged historical standings and correct pre-round grouping.
+- UI indicates the current round's effective method. Unsupported Swiss/McMahon/Scheveningen automatic generators remain disabled.
+- Both Standings modes, new confirmations, and warnings work in uk-UA and en, with localization-key parity.
 
-Frontend integration/browser checks:
+Run the existing backend/frontend Docker test profiles, TypeScript checks, build, and a focused bilingual browser smoke test. Do not deploy without owner instruction.
 
-- Checkbox OFF/ON changes only display order/group presentation, not persisted official ranking, and has uk/en text.
-- RR selected round: one-round generation default; all-round checkbox generates remaining/all stage rounds as specified; odd-roster bye is visible.
-- Manual-protection UI disabled for RR; visible/usable for non-RR manual pairings.
-- Stage method and transitions are visible; replacing unplayed future RR pairings requests confirmation; any result-bearing future rounds block unsafe stage change.
-- A new entrant after the RR → Swiss boundary cannot be manually placed into an earlier RR round.
+## 9. Approval gate
 
-Run both Docker test profiles, typecheck, build, and a short Ukrainian/English referee-flow browser smoke test. Report actual outcomes. No deployment without owner instruction.
+This document supersedes the earlier **Proposed** text of spec 0001 in place; it is not a separate patch spec. In particular, do **not** retain the old assumptions that byes score zero, that the global system must always identify the first stage, that RR starting numbers are always registration-order, or that a played Berger match with reversed colours conflicts.
 
-## 7. Owner review before approval
-
-This is a proposed contract, not a retroactive modification of spec 0000. Its key interpretation choices are deliberately explicit for owner/referee review:
-
-- Berger roster/seed is fixed on first successful RR generation, rather than recomputed on each click.
-- A terminal RR-only stage must fit a complete single cycle; an RR stage may end early only through an explicit later-system boundary.
-- System transitions change **pairing method**, never historical scoring; unsupported future pairing generators remain disabled.
-- Standings pairing-preparation mode uses results **before the selected round**, independently of the official standings counting toggle.
-- RR ignores manual Protected semantics, but never silently destroys played results or existing XML history.
-
-Do not implement an alternative rule silently. If the owner wants to revise any of these, resolve it in this Proposed specification **before** marking it Approved.
+Do not modify the approved historical spec 0000. This 0001 remains **Proposed** until its status is explicitly changed to Approved by the owner.
