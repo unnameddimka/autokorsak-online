@@ -37,6 +37,11 @@ behavior require a new numbered spec.
 | I16 | A new pairing created in the UI is **protected** by default. | Manually entered pairings should survive a future automatic pairing unless the referee unprotects them. |
 | I17 | Catalog upsert matches linked participants by the stored link. Unlinked participants are matched on an equal normalized display name or an equal non-zero EGD PIN, and each match needs an explicit decision (link / create / skip). | Spec 0000 S4: never silently merge namesakes. |
 | I18 | State-changing requests require the `X-AutoKorsak-Client` header (CSRF guard for an unauthenticated local server). | Cheap protection against other websites driving `127.0.0.1`. |
+| I19 | A finally registered player with pairings cannot be changed to preliminary (409 `participant.pairedCannotBePreliminary`). Imported preliminary players with games stay editable. | Review P1-01: preliminary players must not be paired; nothing historical is erased. |
+| I20 | Converting a game to a bye clears its result and referee flag. If a result was recorded, the existing discard confirmation is required first. Editing an existing bye keeps its retained legacy data. | Review P1-02: a bye cannot carry a two-player result. |
+| I21 | Legacy byes have board number 0. Board 0 is accepted for byes only and is excluded from the board-uniqueness check. | Fixtures store byes without a board, so they must stay editable. |
+| I22 | `skippedRoundsNotAdjusted` is reported only for a counted round that is being played (at least one game has a result) and in which a final player has no game. Empty or unplayed rounds are just awaiting pairings. | Review P2-01: no false scoring warnings. |
+| I23 | `NotPlayingInRound` values that are malformed, out of range, or repeated make the import fail (`xml.invalidValue`) instead of being dropped. | Review P2-04: never lose supported data silently. |
 
 ## Open questions (for the referee / owner)
 

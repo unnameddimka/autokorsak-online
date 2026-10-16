@@ -208,6 +208,25 @@ public class LegacyXmlTests
         Assert.Equal("xml.missingPairingReference", ex.Code);
     }
 
+    [Theory]
+    [InlineData("x")]   // malformed
+    [InlineData("0")]   // out of range (below 1)
+    [InlineData("9")]   // out of range (13x13.xml has 5 rounds)
+    [InlineData("dup")] // repeated value
+    public void Invalid_round_absence_values_are_rejected_not_dropped(string value)
+    {
+        var xml = Encoding.UTF8.GetString(Fixtures.Read(Fixtures.AvailabilityRelativePath));
+        const string original = "<NotPlayingInRound>5</NotPlayingInRound>";
+        Assert.Contains(original, xml);
+        var replacement = value == "dup" ? original + original : $"<NotPlayingInRound>{value}</NotPlayingInRound>";
+        var bad = xml.Replace(original, replacement);
+
+        var ex = Assert.Throws<DomainException>(() => LegacyXmlImporter.Import(Encoding.UTF8.GetBytes(bad), DateTimeOffset.UnixEpoch));
+
+        Assert.Equal("xml.invalidValue", ex.Code);
+        Assert.Equal("NotPlayingInRound", ex.Args["element"]);
+    }
+
     [Fact]
     public void Deeply_nested_documents_are_rejected()
     {

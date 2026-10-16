@@ -30,6 +30,8 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   const [saving, setSaving] = useState(false);
   const isNew = participant === null;
   const games = participant ? view.gameCounts[String(participant.id)] ?? 0 : 0;
+  // A finally registered player with pairings cannot become preliminary (the server enforces this too).
+  const preliminaryBlocked = !isNew && !participant.preliminary && games > 0;
 
   const set = <K extends keyof ParticipantInput>(key: K, value: ParticipantInput[K]) => setForm((f) => ({ ...f, [key]: value }));
   const text = (key: 'localSurname' | 'localFirstName' | 'surname' | 'firstName' | 'grade' | 'country' | 'club' | 'nationality' | 'team' | 'coach' | 'comment') => ({
@@ -139,10 +141,13 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
         <fieldset className="field field-wide">
           <legend className="field-label">{t('field.preliminary')}</legend>
           <div className="inline-options">
-            <label className="checkbox"><input type="radio" name="registration" checked={form.preliminary} onChange={() => set('preliminary', true)} /><span>{t('player.registrationPreliminary')}</span></label>
+            <label className={`checkbox${preliminaryBlocked ? ' disabled' : ''}`} title={preliminaryBlocked ? t('player.preliminaryBlocked') : undefined}>
+              <input type="radio" name="registration" checked={form.preliminary} disabled={preliminaryBlocked} onChange={() => set('preliminary', true)} />
+              <span>{t('player.registrationPreliminary')}</span>
+            </label>
             <label className="checkbox"><input type="radio" name="registration" checked={!form.preliminary} onChange={() => set('preliminary', false)} /><span>{t('player.registrationFinal')}</span></label>
           </div>
-          <span className="field-hint">{t('player.registrationHint')}</span>
+          <span className="field-hint">{t('player.registrationHint')}{preliminaryBlocked && <> {t('player.preliminaryBlocked')}</>}</span>
         </fieldset>
 
         <fieldset className="field field-wide">

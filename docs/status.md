@@ -1,7 +1,8 @@
 # Status
 
-**Current version:** spec 0000 (functional UI prototype), first implementation, 2026-10-16. Pending independent
-review and the first referee demo.
+**Current version:** spec 0000 (functional UI prototype), 2026-10-16. The first implementation (`0cc16168`) has been
+reviewed; this version contains the review corrections and awaits independent re-review before P0 is called
+complete. The first referee demo follows.
 
 ## What works
 
@@ -31,21 +32,26 @@ review and the first referee demo.
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **48 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **61 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
   byes and availability fixtures; new-tournament export without sample data; blocked export for unverified
   systems; export limitations; malformed XML, XXE, duplicate IDs, missing references, excessive depth; editing
   rules (double assignment, board uniqueness, preliminary players, availability, no silent game loss, bulk
-  delete, round shrink); catalog upsert and snapshot independence; API persistence, the import → edit → export →
+  delete, round shrink, paired player cannot become preliminary, game → bye conversion, editing imported byes);
+  standings notices for empty versus played rounds; rejected invalid `NotPlayingInRound` values; catalog upsert and snapshot independence; API persistence, the import → edit → export →
   reimport flow, the CSRF header, and that no legacy XML is leaked to the browser.
-- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **8 passed, 0 failed**
-  (exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no Russian-only
-  letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback).
+- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **10 passed, 0 failed**.
+  Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
+  Russian-only letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback. Component
+  test (jsdom): the settings form prompts before in-app navigation discards unsaved changes, and does not prompt
+  when the form is clean.
 - Manual browser checks (headless Chrome against the container): the S1 flow on the reference fixture, the S2 flow
   (create → players → pairing → result → refresh → finalize → upsert → XML download), dialogs in both languages,
-  no console errors.
+  no console errors. After the review fixes: the unsaved-settings prompt, the new Players columns, the disabled
+  preliminary option for a paired player, and game → bye conversion with discard confirmation were all checked in
+  the running app.
 
 ## Known limitations
 
@@ -69,7 +75,7 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Independent review of the 0000 implementation, recorded below.
+1. Independent re-review of the corrections (see the review log and `docs/review/`).
 2. First demo with the referee. Collect answers to the open questions in `docs/decisions.md` (Kind codes,
    rating → rank, scoring of byes and skipped rounds).
 3. Spec 0001 for the next scope (likely candidates: bye and skipped-round scoring, automatic Swiss/McMahon
@@ -79,4 +85,4 @@ assistant wizard, authentication, other board games, SORP result points.
 
 | Date | Reviewer | Commit | Findings | Resolution |
 |---|---|---|---|---|
-| — | — | — | — | — |
+| 2026-10-16 | GPT-6 | `0cc16168` | 2× P1 (paired player → preliminary; game → bye kept its result), 4× P2 (false skipped-round notice, unsaved settings lost on navigation, Players list missing country/team/coach, invalid `NotPlayingInRound` silently dropped). Architecture accepted. | All six fixed with regression tests; see [review/0000-review-gpt6-0cc16168-response.md](review/0000-review-gpt6-0cc16168-response.md). Awaiting re-review. |

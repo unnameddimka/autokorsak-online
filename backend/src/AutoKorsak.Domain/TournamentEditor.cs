@@ -178,6 +178,11 @@ public static partial class TournamentEditor
 
         if (!isNew)
         {
+            // Preliminary players must not be paired; refuse a new final → preliminary transition while pairings exist.
+            // An already-preliminary imported player with games stays editable (the state is not newly created).
+            if (input.Preliminary && !p.Preliminary && GameCount(t, p.Id) is var games and > 0)
+                throw DomainException.Conflict("participant.pairedCannotBePreliminary", Args(("count", games)));
+
             // Marking a player unavailable for a round they are already paired in would leave an invalid pairing.
             foreach (var r in notPlaying.Where(r => !p.NotPlayingRounds.Contains(r)))
                 if (t.Rounds.FirstOrDefault(x => x.Number == r)?.Pairings.Any(x => x.Involves(p.Id)) == true)
@@ -314,8 +319,10 @@ public static partial class TournamentEditor
         }
 
         var board = input.BoardNumber ?? (isNew ? NextBoard(round) : pairing.BoardNumber);
-        if (board < 1) throw new DomainException("pairing.invalidBoard");
-        if (round.Pairings.Any(x => x != pairing && x.BoardNumber == board))
+        // Legacy byes occupy no board and are stored with board number 0.
+        var boardless = input.IsBye && board == 0;
+        if (board < 1 && !boardless) throw new DomainException("pairing.invalidBoard");
+        if (!boardless && round.Pairings.Any(x => x != pairing && x.BoardNumber == board))
             throw new DomainException("pairing.boardTaken", Args(("board", board)));
         if (input.Handicap is < 0 or > 9) throw new DomainException("pairing.invalidHandicap");
         if (input.AdditionalKomi is < -50 or > 50 || decimal.Round(input.AdditionalKomi * 2) != input.AdditionalKomi * 2)
@@ -324,8 +331,18 @@ public static partial class TournamentEditor
             throw new DomainException("validation.tooLong", Args(("field", "comment"), ("max", MaxTextLength)));
 
         var result = input.Result;
-        if (input.IsBye && result != GameResult.Unset && result != pairing.Result)
+        var resultByReferee = input.ResultByReferee;
+        if (input.IsBye && !pairing.IsBye)
+        {
+            // Converting a game into a bye: a two-player result cannot belong to a bye. UpdatePairing has already
+            // required explicit confirmation if a recorded result is being discarded.
+            result = GameResult.Unset;
+            resultByReferee = false;
+        }
+        else if (input.IsBye && result != GameResult.Unset && result != pairing.Result)
+        {
             throw new DomainException("pairing.byeResultNotSupported");
+        }
         if (result == GameResult.Draw && !input.AllowDraw && pairing.Result != GameResult.Draw)
             throw new DomainException("pairing.drawNotAllowed");
         if (result == GameResult.Unknown && pairing.Result != GameResult.Unknown)
@@ -341,7 +358,7 @@ public static partial class TournamentEditor
         pairing.AllowDraw = input.AllowDraw;
         if (result != GameResult.Unknown) pairing.LegacyResultToken = null;
         pairing.Result = result;
-        pairing.ResultByReferee = input.ResultByReferee;
+        pairing.ResultByReferee = resultByReferee;
         pairing.Comment = input.Comment ?? "";
         pairing.Protected = input.Protected;
     }

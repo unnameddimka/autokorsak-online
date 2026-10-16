@@ -154,6 +154,23 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Paired_player_cannot_become_preliminary_and_nothing_changes()
+    {
+        var client = _factory.Client();
+        var imported = await Import(client, Fixtures.Read(Fixtures.ReferenceRelativePath));
+        var id = imported["tournament"]!["id"]!.GetValue<string>();
+        var input = LegacyXmlTests.Player("Кобзар Гліб", preliminary: true, rating: 1240) with { Rank = "9k" };
+
+        var response = await client.PutAsJsonAsync($"/api/tournaments/{id}/participants/1", input, Json);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("participant.pairedCannotBePreliminary", await ErrorCode(response));
+        var reloaded = (await Body(await client.GetAsync($"/api/tournaments/{id}")))["tournament"]!.Deserialize<Tournament>(Json)!;
+        Assert.False(reloaded.FindParticipant(1)!.Preliminary);
+        Assert.Equal(6, reloaded.AllPairings().Count(x => x.Pairing.Involves(1)));
+    }
+
+    [Fact]
     public async Task Mutations_without_client_header_are_refused()
     {
         var client = _factory.CreateClient();

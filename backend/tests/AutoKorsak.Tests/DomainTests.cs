@@ -70,6 +70,31 @@ public class StandingsTests
         Assert.Contains(StandingsCalculator.NoticeByes, s.Notices);
     }
 
+    [Fact]
+    public void Empty_rounds_awaiting_pairing_raise_no_skipped_round_notice()
+    {
+        var t = TournamentEditor.Create(Settings("Fresh", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        var a = TournamentEditor.AddParticipant(t, Player("A"));
+        var b = TournamentEditor.AddParticipant(t, Player("B"));
+        TournamentEditor.AddParticipant(t, Player("C") with { NotPlayingRounds = [1] });
+        Assert.Empty(StandingsCalculator.Calculate(t).Notices);
+
+        // Pairings without results: the round is still in progress, not a skipped-round situation.
+        TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id));
+        Assert.DoesNotContain(StandingsCalculator.NoticeSkippedRounds, StandingsCalculator.Calculate(t).Notices);
+    }
+
+    [Fact]
+    public void Player_without_a_game_in_a_played_round_raises_skipped_round_notice()
+    {
+        var t = TournamentEditor.Create(Settings("Played", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        var a = TournamentEditor.AddParticipant(t, Player("A"));
+        var b = TournamentEditor.AddParticipant(t, Player("B"));
+        TournamentEditor.AddParticipant(t, Player("C"));
+        TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id, GameResult.BlackWins));
+        Assert.Contains(StandingsCalculator.NoticeSkippedRounds, StandingsCalculator.Calculate(t).Notices);
+    }
+
     private static void AssertRow(Tournament t, StandingsResult s, string name, int place, decimal wins, decimal sos, decimal sodos, decimal sosos)
     {
         var row = s.Rows.Single(r => r.ParticipantId == t.ByName(name).Id);
@@ -156,7 +181,7 @@ public class EditorRuleTests
         var (t, a, b, _) = Setup();
         var withGame = TournamentEditor.AddParticipant(t, Player("P1"));
         TournamentEditor.AddPairing(t, 1, Pair(a.Id, withGame.Id));
-        TournamentEditor.UpdateParticipant(t, withGame.Id, Player("P1", preliminary: true));
+        withGame.Preliminary = true; // only reachable through imported legacy data; the editor refuses it (P1-01)
         TournamentEditor.AddParticipant(t, Player("P2", preliminary: true));
 
         var result = TournamentEditor.DeleteAllPreliminary(t);
@@ -164,6 +189,89 @@ public class EditorRuleTests
         Assert.Equal(1, result.Deleted);
         Assert.Equal([withGame.Id], result.SkippedWithGames);
         Assert.NotNull(t.FindParticipant(withGame.Id));
+    }
+
+    [Theory]
+    [InlineData(GameResult.Unset)]
+    [InlineData(GameResult.BlackWins)]
+    public void Paired_player_cannot_be_changed_to_preliminary(GameResult result)
+    {
+        var (t, a, b, _) = Setup();
+        var pairing = TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id, result));
+
+        var ex = Assert.Throws<DomainException>(() => TournamentEditor.UpdateParticipant(t, b.Id, Player("B", preliminary: true)));
+
+        Assert.Equal("participant.pairedCannotBePreliminary", ex.Code);
+        Assert.True(ex.IsConflict);
+        Assert.False(t.FindParticipant(b.Id)!.Preliminary);
+        Assert.Equal(result, pairing.Result);
+        Assert.Equal([a.Id, b.Id], pairing.PlayerIds());
+    }
+
+    [Fact]
+    public void Preliminary_player_without_games_stays_editable_and_finalizable()
+    {
+        var (t, _, _, _) = Setup();
+        var p = TournamentEditor.AddParticipant(t, Player("P", preliminary: true));
+        TournamentEditor.UpdateParticipant(t, p.Id, Player("P renamed", preliminary: true));
+        TournamentEditor.UpdateParticipant(t, p.Id, Player("P renamed", preliminary: false));
+        Assert.False(p.Preliminary);
+    }
+
+    [Fact]
+    public void Converting_a_played_game_to_a_bye_requires_confirmation_and_clears_the_result()
+    {
+        var (t, a, b, _) = Setup();
+        var pairing = TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id, GameResult.BlackWins) with { ResultByReferee = true });
+        var toBye = Pair(a.Id, b.Id, GameResult.BlackWins) with { IsBye = true, ResultByReferee = true };
+
+        Assert.Equal("pairing.resultWouldBeDiscarded",
+            Assert.Throws<DomainException>(() => TournamentEditor.UpdatePairing(t, pairing.Id, toBye, confirmDiscardResult: false)).Code);
+        Assert.Equal(GameResult.BlackWins, pairing.Result);
+
+        TournamentEditor.UpdatePairing(t, pairing.Id, toBye, confirmDiscardResult: true);
+
+        Assert.True(pairing.IsBye);
+        Assert.Null(pairing.WhiteId);
+        Assert.Equal(GameResult.Unset, pairing.Result);
+        Assert.False(pairing.ResultByReferee);
+        var back = LegacyXml.LegacyXmlImporter.Import(
+            LegacyXml.LegacyXmlExporter.ToBytes(LegacyXml.LegacyXmlExporter.Export(t)), DateTimeOffset.UnixEpoch);
+        var exported = back.Rounds.Single(r => r.Number == 1).Pairings.Single();
+        Assert.True(exported.IsBye);
+        Assert.Equal(GameResult.Unset, exported.Result);
+        Assert.Equal(a.Id, exported.BlackId);
+    }
+
+    [Fact]
+    public void Converting_an_unplayed_game_to_a_bye_needs_no_confirmation()
+    {
+        var (t, a, b, _) = Setup();
+        var pairing = TournamentEditor.AddPairing(t, 1, Pair(a.Id, b.Id));
+        TournamentEditor.UpdatePairing(t, pairing.Id, Pair(a.Id, b.Id) with { IsBye = true }, confirmDiscardResult: false);
+        Assert.True(pairing.IsBye);
+        Assert.Equal(GameResult.Unset, pairing.Result);
+    }
+
+    [Fact]
+    public void Editing_an_imported_bye_keeps_its_retained_legacy_data()
+    {
+        var t = Fixtures.Import(Fixtures.OddPlayersRelativePath);
+        var (round, bye) = t.AllPairings().First(x => x.Pairing.IsBye && x.Pairing.BlackId is not null && x.Pairing.LegacyXml!.Contains("UpDownBalance"));
+        var legacy = bye.LegacyXml;
+        var input = new PairingInput(bye.BlackId, null, true, bye.BoardNumber, bye.BoardNumberFixed, bye.Handicap, bye.AdditionalKomi,
+            bye.AllowDraw, bye.Result, bye.ResultByReferee, "edited comment", bye.Protected);
+
+        TournamentEditor.UpdatePairing(t, bye.Id, input, confirmDiscardResult: false);
+
+        Assert.Equal(legacy, bye.LegacyXml);
+        var xml = System.Text.Encoding.UTF8.GetString(LegacyXml.LegacyXmlExporter.ToBytes(LegacyXml.LegacyXmlExporter.Export(t)));
+        var exportedRound = System.Xml.Linq.XDocument.Parse(xml).Root!.Elements("TournamentRound")
+            .Single(r => (int)r.Element("RoundNumber")! == round.Number);
+        var exportedBye = exportedRound.Elements("Pairing").Single(p => (string?)p.Element("Comment") == "edited comment");
+        Assert.Equal(
+            System.Xml.Linq.XElement.Parse(legacy!).Element("UpDownBalance")!.Value,
+            exportedBye.Element("UpDownBalance")!.Value);
     }
 
     [Fact]

@@ -146,7 +146,7 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
           : playerSelect('whiteId', t('color.white'))}
         <div className="field-wide inline-options">
           <button type="button" onClick={swap} disabled={form.isBye}>{t('pairing.swap')}</button>
-          <Checkbox label={t('pairing.isBye')} checked={form.isBye} onChange={(v) => set('isBye', v)} hint={t('pairing.byeHint')} />
+          <Checkbox label={t('pairing.isBye')} checked={form.isBye} onChange={(v) => setForm((f) => (v ? { ...f, isBye: true, result: 'unset', resultByReferee: false } : { ...f, isBye: false }))} hint={t('pairing.byeHint')} />
         </div>
 
         <Field label={t('pairing.handicap')} hint={t('pairing.handicapUnit')}>

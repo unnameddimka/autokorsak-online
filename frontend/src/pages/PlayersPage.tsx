@@ -64,6 +64,7 @@ export function PlayersPage() {
       {players.length === 0 ? (
         <div className="empty-state"><p>{t('players.empty')}</p></div>
       ) : (
+        <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -72,7 +73,10 @@ export function PlayersPage() {
               <th>{t('players.englishName')}</th>
               <th>{t('field.rank')}</th>
               <th className="num">{t('field.rating')}</th>
+              <th>{t('field.country')}</th>
               <th>{t('field.club')}</th>
+              <th>{t('field.team')}</th>
+              <th>{t('field.coach')}</th>
               <th>{t('players.registration')}</th>
               <th>{t('field.availability')}</th>
               <th className="num">{t('players.games')}</th>
@@ -90,7 +94,10 @@ export function PlayersPage() {
                 <td lang="en">{[p.surname, p.firstName].filter(Boolean).join(' ')}</td>
                 <td>{p.rank && formatRank(p.rank, t)}</td>
                 <td className="num">{p.rating || ''}</td>
+                <td>{p.country}</td>
                 <td>{p.club}</td>
+                <td>{p.team}</td>
+                <td>{p.coach}</td>
                 <td>{p.preliminary
                   ? <span className="badge badge-warning">{t('player.registrationPreliminary')}</span>
                   : <span className="badge badge-ok">{t('player.registrationFinal')}</span>}</td>
@@ -111,6 +118,7 @@ export function PlayersPage() {
             ))}
           </tbody>
         </table>
+        </div>
       )}
 
       {editing && <PlayerEditor participant={editing === 'new' ? null : editing} onClose={() => setEditing(null)} />}

@@ -16,7 +16,7 @@ browser ── React SPA (frontend/) ──HTTP/JSON──▶ ASP.NET Core Minim
 
 | Component | Responsibility | Must not |
 |---|---|---|
-| `frontend/` (React 19, TypeScript, Vite, react-router) | Screens, forms, localization (`src/i18n`), calls the API, shows the API's localized errors | Contain business rules or calculations |
+| `frontend/` (React 19, TypeScript, Vite, react-router data router) | Screens, forms, localization (`src/i18n`), calls the API, shows the API's localized errors | Contain business rules or calculations |
 | `AutoKorsak.Domain` | Aggregate model, all validation and editing rules (`TournamentEditor`), standings (`StandingsCalculator`), catalog upsert planning (`CatalogUpsert`) | Know about HTTP, SQLite, or XML |
 | `AutoKorsak.LegacyXml` | Safe parsing, import into the domain model, export by patching, export limitation report | Contain business rules beyond format mapping |
 | `AutoKorsak.Api` | HTTP endpoints, error mapping, SQLite persistence, write serialization, serving the SPA | Contain business rules |
@@ -59,7 +59,7 @@ cannot add it without a CORS preflight, and the server never approves preflights
 - `Round` → `Pairing` (black/white IDs, bye flag, board, result, protection, handicap/komi, comment).
 - Standings are **derived** on every request from pairings and results; they are never stored.
 - Enforced rules: a player appears at most once per round; board numbers are unique per round; a new assignment
-  requires final registration and availability in that round; a pairing with a result cannot be deleted or
+  requires final registration and availability in that round; a paired player cannot be changed to preliminary registration; converting a game to a bye clears its result (with confirmation); a pairing with a result cannot be deleted or
   re-assigned without confirmation; a player with games cannot be deleted; the round count cannot drop below the
   last paired round.
 

@@ -1,15 +1,14 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { BrowserRouter, Link, Navigate, Route, Routes } from 'react-router-dom';
+import { createBrowserRouter, Link, Navigate, Outlet, RouterProvider } from 'react-router-dom';
 import { I18nProvider, useI18n } from './i18n';
 import { ConfirmProvider, LanguageSelect, SaveIndicator, ToastProvider } from './components/common';
 import { TournamentListPage } from './pages/TournamentListPage';
-import { NewTournamentPage } from './pages/SettingsPage';
+import { NewTournamentPage, TournamentSettingsPage } from './pages/SettingsPage';
 import { TournamentLayout, useTournamentHeader } from './pages/TournamentLayout';
 import { StandingsPage } from './pages/StandingsPage';
 import { PairingsPage } from './pages/PairingsPage';
 import { PlayersPage } from './pages/PlayersPage';
-import { TournamentSettingsPage } from './pages/SettingsPage';
 import './styles.css';
 
 function Shell() {
@@ -32,18 +31,7 @@ function Shell() {
         </div>
       </header>
       <main className="app-main">
-        <Routes>
-          <Route path="/" element={<TournamentListPage />} />
-          <Route path="/new" element={<NewTournamentPage />} />
-          <Route path="/t/:id" element={<TournamentLayout />}>
-            <Route index element={<Navigate to="standings" replace />} />
-            <Route path="standings" element={<StandingsPage />} />
-            <Route path="pairings" element={<PairingsPage />} />
-            <Route path="players" element={<PlayersPage />} />
-            <Route path="settings" element={<TournamentSettingsPage />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Outlet />
       </main>
     </div>
   );
@@ -59,14 +47,35 @@ function NotFound() {
   );
 }
 
+// A data router is required for navigation blocking (unsaved settings guard).
+const router = createBrowserRouter([
+  {
+    element: <Shell />,
+    children: [
+      { path: '/', element: <TournamentListPage /> },
+      { path: '/new', element: <NewTournamentPage /> },
+      {
+        path: '/t/:id',
+        element: <TournamentLayout />,
+        children: [
+          { index: true, element: <Navigate to="standings" replace /> },
+          { path: 'standings', element: <StandingsPage /> },
+          { path: 'pairings', element: <PairingsPage /> },
+          { path: 'players', element: <PlayersPage /> },
+          { path: 'settings', element: <TournamentSettingsPage /> },
+        ],
+      },
+      { path: '*', element: <NotFound /> },
+    ],
+  },
+]);
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nProvider>
       <ToastProvider>
         <ConfirmProvider>
-          <BrowserRouter>
-            <Shell />
-          </BrowserRouter>
+          <RouterProvider router={router} />
         </ConfirmProvider>
       </ToastProvider>
     </I18nProvider>

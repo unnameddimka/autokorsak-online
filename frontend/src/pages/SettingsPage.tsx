@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useBlocker, useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
 import type { CriterionSetting, LayoutColumn, SettingsInput, Tournament, TournamentSystem } from '../api/types';
-import { Checkbox, Field, Notice, NotImplementedBadge, useToast } from '../components/common';
+import { Checkbox, Field, Notice, NotImplementedBadge, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/en';
 import { errorMessage } from '../format';
@@ -87,6 +87,20 @@ function SettingsForm({ initial, legacyKind, submitLabel, onSubmit, onCancel }: 
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const dirty = JSON.stringify(form) !== JSON.stringify(initial);
+  const confirm = useConfirm();
+  const submitting = useRef(false);
+
+  // Guard unsaved edits against in-app navigation (tabs, header links); the beforeunload handler covers reloads.
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    dirty && !submitting.current && currentLocation.pathname !== nextLocation.pathname);
+  const blockerRef = useRef(blocker);
+  blockerRef.current = blocker;
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    confirm({ title: t('settings.leaveTitle'), message: t('settings.leaveMessage'), confirmLabel: t('settings.leaveConfirm'), danger: true })
+      .then((leave) => { if (leave) blockerRef.current.proceed?.(); else blockerRef.current.reset?.(); });
+  // Runs once per blocked navigation; re-running on a language change would open a second dialog.
+  }, [blocker.state]);
   const set = <K extends keyof SettingsInput>(key: K, value: SettingsInput[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   useEffect(() => {
@@ -104,8 +118,10 @@ function SettingsForm({ initial, legacyKind, submitLabel, onSubmit, onCancel }: 
     setSaving(true);
     setError(null);
     try {
+      submitting.current = true;
       await onSubmit(form);
     } catch (e) {
+      submitting.current = false;
       setError(e);
     } finally {
       setSaving(false);

@@ -154,9 +154,7 @@ public static class LegacyXmlImporter
             Preliminary = Bool(el, "PreliminaryRegistration"),
             Comment = Str(el, "Comment"),
             StartScore = Int(el, "StartScores", 0),
-            NotPlayingRounds = el.Elements("NotPlayingInRound")
-                .Select(e => int.TryParse(e.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var r) ? r : 0)
-                .Where(r => r >= 1 && r <= rounds).Distinct().Order().ToList(),
+            NotPlayingRounds = ReadNotPlayingRounds(el, rounds),
             FirstName = Str(player, "FirstName"),
             Surname = Str(player, "Surname"),
             LocalFirstName = Str(player, "LocalFirstName"),
@@ -169,6 +167,25 @@ public static class LegacyXmlImporter
             EgdPin = Long(player, "EgdPin"),
             LegacyXml = el.ToString(SaveOptions.DisableFormatting),
         };
+    }
+
+    /// <summary>
+    /// Per-round absence is a supported field, so malformed, out-of-range or repeated values are rejected rather
+    /// than dropped (dropping them would silently lose data on export).
+    /// </summary>
+    private static List<int> ReadNotPlayingRounds(XElement participant, int rounds)
+    {
+        var result = new List<int>();
+        foreach (var e in participant.Elements("NotPlayingInRound"))
+        {
+            var text = e.Value.Trim();
+            if (!int.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var round)
+                || round < 1 || round > rounds || result.Contains(round))
+                throw Invalid("NotPlayingInRound", text);
+            result.Add(round);
+        }
+        result.Sort();
+        return result;
     }
 
     private static void ReadRound(XElement el, Tournament t)
