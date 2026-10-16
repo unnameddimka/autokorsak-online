@@ -5,7 +5,13 @@ using AutoKorsak.LegacyXml;
 namespace AutoKorsak.Api;
 
 /// <summary>What the browser receives: the tournament without retained legacy XML, plus small derived facts.</summary>
-public sealed record TournamentView(Tournament Tournament, bool Imported, IReadOnlyDictionary<int, int> GameCounts, object? Result = null);
+public sealed record TournamentView(
+    Tournament Tournament,
+    bool Imported,
+    IReadOnlyDictionary<int, int> GameCounts,
+    bool SystemLocked,
+    int? DefaultJoinRound,
+    object? Result = null);
 
 /// <summary>
 /// Application service: loads an aggregate, applies a domain operation and saves it atomically.
@@ -17,7 +23,12 @@ public sealed class TournamentService(Storage storage, TimeProvider clock)
 
     public IReadOnlyList<TournamentSummary> List() => storage.ListTournaments();
 
-    public Tournament Load(Guid id) => storage.GetTournament(id) ?? throw new NotFoundException("tournament.notFound");
+    public Tournament Load(Guid id)
+    {
+        var t = storage.GetTournament(id) ?? throw new NotFoundException("tournament.notFound");
+        t.EnsureStages(); // pre-0001 data: one stage with the stored system (persisted on the next save)
+        return t;
+    }
 
     public TournamentView Get(Guid id) => View(Load(id));
 
@@ -82,6 +93,7 @@ public sealed class TournamentService(Storage storage, TimeProvider clock)
 
     public static TournamentView View(Tournament t, object? result = null)
     {
+        t.EnsureStages();
         var copy = JsonSerializer.Deserialize<Tournament>(JsonSerializer.Serialize(t, Storage.Json), Storage.Json)!;
         copy.LegacySourceXml = null;
         foreach (var p in copy.Participants) p.LegacyXml = null;
@@ -91,6 +103,7 @@ public sealed class TournamentService(Storage storage, TimeProvider clock)
             foreach (var p in r.Pairings) p.LegacyXml = null;
         }
         var games = t.Participants.ToDictionary(p => p.Id, p => TournamentEditor.GameCount(t, p.Id));
-        return new TournamentView(copy, t.LegacySourceXml is not null, games, result);
+        return new TournamentView(copy, t.LegacySourceXml is not null, games,
+            TournamentEditor.IsSystemLocked(t), TournamentEditor.DefaultJoinRound(t), result);
     }
 }

@@ -1,6 +1,6 @@
 namespace AutoKorsak.Domain;
 
-public enum CellKind { None, Game, Bye, NotPlaying }
+public enum CellKind { None, Game, Bye, NotPlaying, NotJoined }
 
 public enum CellOutcome { Unset, Win, Loss, Draw, BothLose, Unknown }
 
@@ -30,14 +30,24 @@ public sealed record StandingsResult(
     IReadOnlyList<StandingRow> Rows,
     IReadOnlyList<string> Notices);
 
+public sealed record PreparationRow(int Position, int ParticipantId, decimal GroupScore, IReadOnlyList<RoundCell> Rounds);
+
+/// <summary>Pairing-preparation view for round <see cref="Round"/>: score groups from rounds before it, then rating.</summary>
+public sealed record PreparationResult(
+    int Round,
+    TournamentSystem? System,
+    IReadOnlyList<int> DisplayedRounds,
+    IReadOnlyList<int> ScoredRounds,
+    IReadOnlyList<PreparationRow> Rows,
+    IReadOnlyList<string> Notices);
+
 /// <summary>
-/// Derives standings from pairings and results. Implements only verified rules for regular games:
-/// win = 1 point, SOS = sum of opponents' points, SODOS = sum of points of defeated opponents,
-/// SOSOS = sum of opponents' SOS. Unsupported situations are reported as notices, never silently "corrected".
+/// Derives standings from pairings and results. Verified rules: win = 1 point, a bye = one win and one point
+/// (spec 0001 §4), SOS = sum of opponents' points, SODOS = sum of points of defeated opponents, SOSOS = sum of
+/// opponents' SOS. Unsupported situations are reported as notices, never silently "corrected".
 /// </summary>
 public static class StandingsCalculator
 {
-    public const string NoticeByes = "byesNotScored";
     public const string NoticeSpecialResults = "specialResultsSimplified";
     public const string NoticeUnfinishedGames = "unfinishedGames";
     public const string NoticeSkippedRounds = "skippedRoundsNotAdjusted";
@@ -46,16 +56,28 @@ public static class StandingsCalculator
 
     private sealed record Game(int Opponent, decimal OwnScore, CellOutcome Outcome);
 
-    public static StandingsResult Calculate(Tournament t)
+    /// <summary>Scores and cells over a set of rounds; shared by the official standings and the preparation view.</summary>
+    private sealed class Tally
     {
-        var current = Math.Clamp(t.CurrentRound, 1, Math.Max(1, t.NumberOfRounds));
-        var displayed = Enumerable.Range(1, current).ToList();
-        var counted = t.IncludeCurrentRound ? displayed : displayed.Where(r => r < current).ToList();
-        var notices = new SortedSet<string>(StringComparer.Ordinal);
+        public required Dictionary<int, List<Game>> Games { get; init; }
+        public required Dictionary<int, int> Byes { get; init; }
+        public required Dictionary<int, Dictionary<int, RoundCell>> Cells { get; init; }
+        public required SortedSet<string> Notices { get; init; }
 
+        public decimal Points(int id) => Games[id].Sum(g => g.OwnScore) + Byes[id];
+        public decimal Wins(int id) => Games[id].Count(g => g.Outcome == CellOutcome.Win) + Byes[id];
+    }
+
+    private static Tally Compute(Tournament t, IReadOnlyList<int> displayed, IReadOnlyCollection<int> counted)
+    {
         var ids = t.Participants.Select(p => p.Id).ToList();
-        var games = ids.ToDictionary(id => id, _ => new List<Game>());
-        var cells = ids.ToDictionary(id => id, _ => new Dictionary<int, RoundCell>());
+        var tally = new Tally
+        {
+            Games = ids.ToDictionary(id => id, _ => new List<Game>()),
+            Byes = ids.ToDictionary(id => id, _ => 0),
+            Cells = ids.ToDictionary(id => id, _ => new Dictionary<int, RoundCell>()),
+            Notices = new SortedSet<string>(StringComparer.Ordinal),
+        };
 
         foreach (var roundNumber in displayed)
         {
@@ -65,56 +87,75 @@ public static class StandingsCalculator
             {
                 if (p.IsBye)
                 {
-                    if (p.BlackId is { } byePlayer && cells.TryGetValue(byePlayer, out var c))
-                        c[roundNumber] = new RoundCell(roundNumber, CellKind.Bye);
-                    if (isCounted) notices.Add(NoticeByes);
+                    // A bye is a victory without a played game: one win and one point, no opponent (spec 0001 §4).
+                    if (p.BlackId is { } byePlayer && tally.Cells.TryGetValue(byePlayer, out var c))
+                    {
+                        c[roundNumber] = new RoundCell(roundNumber, CellKind.Bye, Outcome: CellOutcome.Win);
+                        if (isCounted) tally.Byes[byePlayer]++;
+                    }
                     continue;
                 }
-                if (p.BlackId is not { } b || p.WhiteId is not { } w || !games.ContainsKey(b) || !games.ContainsKey(w)) continue;
+                if (p.BlackId is not { } b || p.WhiteId is not { } w || !tally.Games.ContainsKey(b) || !tally.Games.ContainsKey(w)) continue;
 
                 var (bOut, wOut) = Outcomes(p.Result);
-                cells[b][roundNumber] = new RoundCell(roundNumber, CellKind.Game, w, null, bOut, StoneColor.Black, p.ResultByReferee);
-                cells[w][roundNumber] = new RoundCell(roundNumber, CellKind.Game, b, null, wOut, StoneColor.White, p.ResultByReferee);
+                tally.Cells[b][roundNumber] = new RoundCell(roundNumber, CellKind.Game, w, null, bOut, StoneColor.Black, p.ResultByReferee);
+                tally.Cells[w][roundNumber] = new RoundCell(roundNumber, CellKind.Game, b, null, wOut, StoneColor.White, p.ResultByReferee);
                 if (!isCounted) continue;
 
                 switch (p.Result)
                 {
                     case GameResult.Unset:
-                        notices.Add(NoticeUnfinishedGames);
+                        tally.Notices.Add(NoticeUnfinishedGames);
                         continue;
                     case GameResult.Unknown:
-                        notices.Add(NoticeSpecialResults);
+                        tally.Notices.Add(NoticeSpecialResults);
                         continue;
                     case GameResult.BothLose or GameResult.Draw:
-                        notices.Add(NoticeSpecialResults);
+                        tally.Notices.Add(NoticeSpecialResults);
                         break;
                 }
-                games[b].Add(new Game(w, Score(bOut), bOut));
-                games[w].Add(new Game(b, Score(wOut), wOut));
+                tally.Games[b].Add(new Game(w, Score(bOut), bOut));
+                tally.Games[w].Add(new Game(b, Score(wOut), wOut));
             }
         }
 
-        // An explicit absence (NotPlayingRounds) in a counted round is always a skipped round. An available but
-        // unpaired player only has one once the round is being played (any game has a result); before that the
-        // round is simply awaiting pairings/results.
+        // An explicit absence in a counted round is always a skipped round. An available but unpaired player only
+        // has one once the round is being played (any game has a result). Rounds before a player's joining round
+        // are not skipped rounds at all (spec 0001 §2.2).
         var playedRounds = t.Rounds
             .Where(r => r.Pairings.Any(p => !p.IsBye && p.Result != GameResult.Unset))
             .Select(r => r.Number)
             .ToHashSet();
         foreach (var participant in t.Participants)
-            foreach (var r in displayed.Where(r => !cells[participant.Id].ContainsKey(r)))
+            foreach (var r in displayed.Where(r => !tally.Cells[participant.Id].ContainsKey(r)))
             {
+                if (!participant.HasJoinedBy(r))
+                {
+                    tally.Cells[participant.Id][r] = new RoundCell(r, CellKind.NotJoined);
+                    continue;
+                }
                 var notPlaying = !participant.PlaysInRound(r);
-                cells[participant.Id][r] = new RoundCell(r, notPlaying ? CellKind.NotPlaying : CellKind.None);
+                tally.Cells[participant.Id][r] = new RoundCell(r, notPlaying ? CellKind.NotPlaying : CellKind.None);
                 if (counted.Contains(r) && !participant.Preliminary && (notPlaying || playedRounds.Contains(r)))
-                    notices.Add(NoticeSkippedRounds);
+                    tally.Notices.Add(NoticeSkippedRounds);
             }
+        return tally;
+    }
 
-        var points = ids.ToDictionary(id => id, id => games[id].Sum(g => g.OwnScore));
-        var wins = ids.ToDictionary(id => id, id => (decimal)games[id].Count(g => g.Outcome == CellOutcome.Win));
-        var sos = ids.ToDictionary(id => id, id => games[id].Sum(g => points[g.Opponent]));
-        var sodos = ids.ToDictionary(id => id, id => games[id].Sum(g => g.OwnScore * points[g.Opponent]));
-        var sosos = ids.ToDictionary(id => id, id => games[id].Sum(g => sos[g.Opponent]));
+    public static StandingsResult Calculate(Tournament t)
+    {
+        var current = Math.Clamp(t.CurrentRound, 1, Math.Max(1, t.NumberOfRounds));
+        var displayed = Enumerable.Range(1, current).ToList();
+        var counted = t.IncludeCurrentRound ? displayed : displayed.Where(r => r < current).ToList();
+        var tally = Compute(t, displayed, counted);
+        var notices = tally.Notices;
+        var ids = t.Participants.Select(p => p.Id).ToList();
+
+        var points = ids.ToDictionary(id => id, tally.Points);
+        var wins = ids.ToDictionary(id => id, tally.Wins);
+        var sos = ids.ToDictionary(id => id, id => tally.Games[id].Sum(g => points[g.Opponent]));
+        var sodos = ids.ToDictionary(id => id, id => tally.Games[id].Sum(g => g.OwnScore * points[g.Opponent]));
+        var sosos = ids.ToDictionary(id => id, id => tally.Games[id].Sum(g => sos[g.Opponent]));
         if (t.System == TournamentSystem.McMahon) notices.Add(NoticeMcMahon);
 
         var criteria = t.Criteria
@@ -146,7 +187,7 @@ public static class StandingsCalculator
             .ThenBy(p => p.Id)
             .ToList();
 
-        var position = ordered.Select((p, i) => (p.Id, i)).ToDictionary(x => x.Id, x => x.i + 1);
+        var position = Positions(ordered);
         var rows = new List<StandingRow>();
         for (var i = 0; i < ordered.Count; i++)
         {
@@ -155,15 +196,47 @@ public static class StandingsCalculator
             while (first > 0 && CompareByCriteria(sortKeys, values, ordered[first - 1].Id, id) == 0) first--;
             var last = i;
             while (last < ordered.Count - 1 && CompareByCriteria(sortKeys, values, ordered[last + 1].Id, id) == 0) last++;
-
-            var roundCells = displayed
-                .Select(r => cells[id][r] is { OpponentId: { } opp } cell ? cell with { OpponentPosition = position[opp] } : cells[id][r])
-                .ToList();
-            rows.Add(new StandingRow(i + 1, first + 1, last + 1, id, values[id], roundCells));
+            rows.Add(new StandingRow(i + 1, first + 1, last + 1, id, values[id], CellsFor(tally, id, displayed, position)));
         }
 
         return new StandingsResult(displayed, counted, criteria, rows, notices.ToList());
     }
+
+    /// <summary>
+    /// Pairing-preparation view for the current round R (spec 0001 §7): score group from rounds strictly before R
+    /// (byes included; McMahon stages add the stored start score), then rating, name and ID. SOS-type coefficients
+    /// are deliberately not used. Independent of the "include current round" switch; not an official ranking.
+    /// </summary>
+    public static PreparationResult CalculatePreparation(Tournament t)
+    {
+        var current = Math.Clamp(t.CurrentRound, 1, Math.Max(1, t.NumberOfRounds));
+        var displayed = Enumerable.Range(1, current).ToList();
+        var scored = displayed.Where(r => r < current).ToList();
+        var tally = Compute(t, displayed, scored);
+        var system = t.StageFor(current).System;
+        var mcMahon = system == TournamentSystem.McMahon;
+
+        var group = t.Participants.ToDictionary(p => p.Id, p => tally.Points(p.Id) + (mcMahon ? p.StartScore : 0));
+        var ordered = t.Participants
+            .OrderByDescending(p => group[p.Id])
+            .ThenByDescending(p => p.Rating)
+            .ThenBy(p => p.DisplayName, StringComparer.Ordinal)
+            .ThenBy(p => p.Id)
+            .ToList();
+        var position = Positions(ordered);
+        var rows = ordered
+            .Select((p, i) => new PreparationRow(i + 1, p.Id, group[p.Id], CellsFor(tally, p.Id, displayed, position)))
+            .ToList();
+        return new PreparationResult(current, system, displayed, scored, rows, tally.Notices.ToList());
+    }
+
+    private static Dictionary<int, int> Positions(List<Participant> ordered) =>
+        ordered.Select((p, i) => (p.Id, i)).ToDictionary(x => x.Id, x => x.i + 1);
+
+    private static List<RoundCell> CellsFor(Tally tally, int id, List<int> displayed, Dictionary<int, int> position) =>
+        displayed
+            .Select(r => tally.Cells[id][r] is { OpponentId: { } opp } cell ? cell with { OpponentPosition = position[opp] } : tally.Cells[id][r])
+            .ToList();
 
     private static int CompareByCriteria(List<string> keys, Dictionary<int, IReadOnlyDictionary<string, decimal?>> values, int a, int b)
     {

@@ -9,14 +9,15 @@ import { useTournament } from './TournamentLayout';
 const EMPTY: ParticipantInput = {
   localFirstName: '', localSurname: '', firstName: '', surname: '', rating: 0, rank: '', rankShift: 0, grade: '',
   country: '', club: '', nationality: '', team: '', coach: '', preliminary: false, notPlayingRounds: [], comment: '',
-  catalogEntryId: null,
+  catalogEntryId: null, firstEligibleRound: null,
 };
 
 function toInput(p: Participant): ParticipantInput {
   const { localFirstName, localSurname, firstName, surname, rating, rank, rankShift, grade, country, club, nationality,
     team, coach, preliminary, notPlayingRounds, comment, catalogEntryId } = p;
   return { localFirstName, localSurname, firstName, surname, rating, rank, rankShift, grade, country, club, nationality,
-    team, coach, preliminary, notPlayingRounds: [...notPlayingRounds], comment, catalogEntryId };
+    team, coach, preliminary, notPlayingRounds: [...notPlayingRounds], comment, catalogEntryId,
+    firstEligibleRound: p.firstEligibleRound };
 }
 
 /** Adds or edits a tournament participant. Changes never reach the shared catalog until an explicit upsert. */
@@ -25,7 +26,8 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   const { t, tk } = useI18n();
   const toast = useToast();
   const confirm = useConfirm();
-  const [form, setForm] = useState<ParticipantInput>(() => (participant ? toInput(participant) : EMPTY));
+  const [form, setForm] = useState<ParticipantInput>(() =>
+    (participant ? toInput(participant) : { ...EMPTY, firstEligibleRound: view.defaultJoinRound }));
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const isNew = participant === null;
@@ -150,11 +152,22 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
           <span className="field-hint">{t('player.registrationHint')}{preliminaryBlocked && <> {t('player.preliminaryBlocked')}</>}</span>
         </fieldset>
 
+        <Field label={t('field.firstEligibleRound')} hint={t('player.joinRoundHint')}>
+          <select value={form.firstEligibleRound ?? ''}
+            onChange={(e) => set('firstEligibleRound', e.target.value === '' ? null : Number(e.target.value))}>
+            {form.firstEligibleRound === null && <option value="">{t('player.joinRoundChoose')}</option>}
+            {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => (
+              <option key={r} value={r}>{t('round.label', { roman: roman(r), n: r })}</option>
+            ))}
+          </select>
+        </Field>
+
         <fieldset className="field field-wide">
           <legend className="field-label">{t('field.availability')}</legend>
           <div className="inline-options">
             {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((round) => (
-              <Checkbox key={round} label={roman(round)} checked={!form.notPlayingRounds.includes(round)} onChange={(v) => toggleRound(round, v)} />
+              <Checkbox key={round} label={roman(round)} disabled={round < (form.firstEligibleRound ?? 1)}
+                checked={round >= (form.firstEligibleRound ?? 1) && !form.notPlayingRounds.includes(round)} onChange={(v) => toggleRound(round, v)} />
             ))}
           </div>
         </fieldset>

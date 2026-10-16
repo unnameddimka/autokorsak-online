@@ -48,6 +48,8 @@ public static class ExportAnalyzer
             string.Join(',', back.Layout.Columns.Where(c => c.Visible).Select(c => c.Key)) + back.Layout.ShowColors + back.Layout.HideEmptyColumns);
         Check("tournament", "pairingConstraints", "", Describe(t.PairingConstraints), Describe(back.PairingConstraints));
         Check("tournament", "calculation", "", Describe(t.Calculation), Describe(back.Calculation));
+        // Spec 0001 §6: per-round stages, frozen starting numbers and their randomization have no XML representation.
+        Check("tournament", "stages", "", Describe(t.Stages), Describe(back.Stages));
 
         foreach (var p in t.Participants)
         {
@@ -69,6 +71,7 @@ public static class ExportAnalyzer
             Check("participant", "preliminary", n, p.Preliminary, q.Preliminary);
             Check("participant", "availability", n, string.Join(',', p.NotPlayingRounds), string.Join(',', q.NotPlayingRounds));
             Check("participant", "comment", n, p.Comment, q.Comment);
+            Check("participant", "firstEligibleRound", n, p.FirstEligibleRound, q.FirstEligibleRound);
         }
 
         foreach (var round in t.Rounds)
@@ -100,6 +103,10 @@ public static class ExportAnalyzer
 
     private static string Describe(PairingConstraints c) =>
         $"{c.AvoidSameCountry}{c.AvoidSameClub}{c.AvoidSameNationality}{c.AvoidSameTeam}{c.AvoidSameCoach}";
+
+    private static string Describe(IEnumerable<PairingStage> stages) =>
+        string.Join(";", (stages.Any() ? stages : [new PairingStage()]).Select(s =>
+            $"{s.StartRound}:{s.System}:{(s.FrozenRosterIds is null ? "-" : string.Join(",", s.FrozenRosterIds))}:{s.RandomStartingNumbers}"));
 
     private static string Describe(CalculationSettings c) =>
         $"{c.SkippedRoundScoring}{c.AddNothingToOwnCoefficients}{c.AddMaximumToOpponentCoefficients}{c.TopGroupOnly}";

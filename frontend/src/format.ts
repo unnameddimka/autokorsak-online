@@ -1,5 +1,5 @@
 import { ApiError } from './api/client';
-import type { GameResult } from './api/types';
+import type { GameResult, PairingStage, Tournament, TournamentSystem } from './api/types';
 import type { MessageKey } from './i18n/en';
 
 type T = (key: MessageKey, params?: Record<string, unknown>) => string;
@@ -46,4 +46,19 @@ export function errorMessage(error: unknown, tk: TK): string {
     return tk(`error.${error.code}`, 'error.unknown', args);
   }
   return tk('error.unknown', 'error.unknown', { key: String(error) });
+}
+
+/** The stage covering a round (display only; the server resolves stages for every rule). */
+export function stageFor(t: Tournament, round: number): PairingStage {
+  const stages = t.stages.length > 0 ? t.stages : [{ startRound: 1, system: t.system, frozenRosterIds: null, randomStartingNumbers: false }];
+  return [...stages].reverse().find((s) => s.startRound <= round) ?? stages[0];
+}
+
+export function stageEnd(t: Tournament, stage: PairingStage): number {
+  const next = t.stages.find((s) => s.startRound > stage.startRound);
+  return next ? next.startRound - 1 : t.numberOfRounds;
+}
+
+export function systemLabel(system: TournamentSystem | null, tk: TK, legacyKind: number | null): string {
+  return system ? tk(`system.${system}`, 'field.unknown') : tk('system.legacyUnverified', 'field.unknown', { code: legacyKind ?? '?' });
 }

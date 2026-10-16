@@ -17,6 +17,7 @@ builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = LegacyXmlImp
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(_ => new Storage(builder.Configuration["Storage:DatabasePath"] ?? "data/autokorsak.db"));
 builder.Services.AddSingleton<TournamentService>();
+builder.Services.AddSingleton<IRandomSource, SystemRandomSource>();
 
 var app = builder.Build();
 
@@ -50,6 +51,13 @@ tournaments.MapPut("/{id:guid}/settings", (TournamentService s, Guid id, Setting
 tournaments.MapPut("/{id:guid}/round", (TournamentService s, Guid id, RoundStateInput input) =>
     s.Mutate(id, t => { TournamentEditor.SetCurrentRound(t, input.CurrentRound, input.IncludeCurrentRound); return null; }));
 tournaments.MapGet("/{id:guid}/standings", (TournamentService s, Guid id) => StandingsCalculator.Calculate(s.Load(id)));
+tournaments.MapGet("/{id:guid}/standings/preparation", (TournamentService s, Guid id) => StandingsCalculator.CalculatePreparation(s.Load(id)));
+
+// ---------- pairing stages and generation (spec 0001) ----------
+tournaments.MapPost("/{id:guid}/stages", (TournamentService s, Guid id, StageChangeInput input) =>
+    s.Mutate(id, t => PairingSchedule.ChangeSystem(t, input.StartRound, input.System, input.ConfirmDeleteUnplayed)));
+tournaments.MapPost("/{id:guid}/rounds/{round:int}/generate", (TournamentService s, IRandomSource random, Guid id, int round, GenerateInput input) =>
+    s.Mutate(id, t => PairingSchedule.GenerateRoundRobin(t, round, input.AllRounds, input.RandomStartingNumbers, input.ConfirmReplace, random)));
 
 // ---------- participants ----------
 tournaments.MapPost("/{id:guid}/participants", (TournamentService s, Guid id, ParticipantInput input) =>
@@ -69,7 +77,7 @@ tournaments.MapPut("/{id:guid}/participants/{pid:int}", (TournamentService s, Gu
 tournaments.MapDelete("/{id:guid}/participants/{pid:int}", (TournamentService s, Guid id, int pid) =>
     s.Mutate(id, t => { TournamentEditor.DeleteParticipant(t, pid); return null; }));
 tournaments.MapPost("/{id:guid}/participants/finalize-preliminary", (TournamentService s, Guid id) =>
-    s.Mutate(id, t => new { finalized = TournamentEditor.FinalizeAllPreliminary(t) }));
+    s.Mutate(id, t => TournamentEditor.FinalizeAllPreliminary(t)));
 tournaments.MapPost("/{id:guid}/participants/delete-preliminary", (TournamentService s, Guid id) =>
     s.Mutate(id, t => TournamentEditor.DeleteAllPreliminary(t)));
 
@@ -112,6 +120,10 @@ static string SafeFileName(string name)
 namespace AutoKorsak.Api
 {
     public sealed record RoundStateInput(int CurrentRound, bool IncludeCurrentRound);
+
+    public sealed record StageChangeInput(int StartRound, TournamentSystem? System, bool ConfirmDeleteUnplayed);
+
+    public sealed record GenerateInput(bool AllRounds, bool RandomStartingNumbers, bool ConfirmReplace);
 
     public sealed record UpsertRequest(List<UpsertDecision>? Decisions);
 

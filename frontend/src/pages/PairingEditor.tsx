@@ -4,7 +4,7 @@ import type { GameResult, Pairing, PairingInput, Participant } from '../api/type
 import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/en';
-import { errorMessage, roman } from '../format';
+import { errorMessage, roman, stageFor } from '../format';
 import { useTournament } from './TournamentLayout';
 
 const FLIP: Partial<Record<GameResult, GameResult>> = { blackWins: 'whiteWins', whiteWins: 'blackWins' };
@@ -16,6 +16,9 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
   const confirm = useConfirm();
   const isNew = pairing === null;
   const round = tournament.rounds.find((r) => r.number === roundNumber);
+  // Spec 0001 §3.5: no manual protection in round-robin rounds.
+  const stage = stageFor(tournament, roundNumber);
+  const isRoundRobin = stage.system === 'roundRobin';
 
   const [form, setForm] = useState<PairingInput>(() => pairing
     ? {
@@ -26,7 +29,7 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     }
     : {
       blackId: null, whiteId: null, isBye: false, boardNumber: null, boardNumberFixed: false, handicap: 0, additionalKomi: 0,
-      allowDraw: tournament.allowDraws, result: 'unset', resultByReferee: false, comment: '', protected: true,
+      allowDraw: tournament.allowDraws, result: 'unset', resultByReferee: false, comment: '', protected: !isRoundRobin,
     });
   const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
@@ -41,6 +44,8 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     if (pairedElsewhere.has(p.id)) return 'pairing.optionPaired';
     if (original.has(p.id)) return null;
     if (p.preliminary) return 'pairing.optionPreliminary';
+    if (p.firstEligibleRound > roundNumber) return 'pairing.optionNotJoined';
+    if (stage.frozenRosterIds && !stage.frozenRosterIds.includes(p.id)) return 'pairing.optionNotInRoster';
     if (p.notPlayingRounds.includes(roundNumber)) return 'pairing.optionNotPlaying';
     return null;
   };
@@ -132,6 +137,9 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     >
       {error !== null && <Notice kind="error">{errorMessage(error, tk)}</Notice>}
       <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        {isRoundRobin && (
+          <p className="muted field-wide">{t('pairing.byRefereeWithdrawalHint')}</p>
+        )}
         <Field label={t('pairing.board')} hint={isNew ? t('pairing.boardAutoHint') : undefined}>
           <input type="number" min={1} value={form.boardNumber ?? ''} placeholder={t('pairing.boardAuto')}
             onChange={(e) => set('boardNumber', e.target.value === '' ? null : Number(e.target.value))} />
@@ -170,9 +178,12 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
         <Field label={t('pairing.comment')} wide>
           <input value={form.comment} onChange={(e) => set('comment', e.target.value)} />
         </Field>
-        <div className="field field-wide">
-          <Checkbox label={t('pairing.protected')} checked={form.protected} onChange={(v) => set('protected', v)} hint={t('pairing.protectedHint')} />
-        </div>
+        {!isRoundRobin && (
+          <div className="field field-wide">
+            <Checkbox label={t('pairing.protected')} checked={form.protected} onChange={(v) => set('protected', v)} hint={t('pairing.protectedHint')} />
+          </div>
+        )}
+        {isRoundRobin && <p className="muted field-wide">{t('pairing.roundRobinNoProtection')}</p>}
         <button type="submit" hidden />
       </form>
     </Modal>

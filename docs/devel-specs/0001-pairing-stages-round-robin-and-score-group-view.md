@@ -1,6 +1,6 @@
 # 0001 — Pairing Stages, Round-Robin Generation, and Rating Order Within Score Groups
 
-**Status: Proposed**  
+**Status: Approved** (by the owner, 2026-10-16)  
 **Date:** 2026-10-16  
 **Basis:** Spec 0000, referee feedback (Yulia), and subsequent owner clarifications on 2026-10-16.  
 **UI languages:** Ukrainian (default) and English only.

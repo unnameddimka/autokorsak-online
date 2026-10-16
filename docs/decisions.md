@@ -27,7 +27,7 @@ behavior require a new numbered spec.
 | I6 | Legacy criterion token `Score` maps to *wins* in non-McMahon systems and to *total points* in McMahon. `SOS`/`SODOS`/`SOSOS` map directly. Other criteria have no verified token: they are kept in the app, omitted from the export, and reported. Unknown imported tokens are kept as `legacy:<token>` and written back. | Tokens observed in fixtures; screenshot 02 describes "Очки" as McMahon points. |
 | I7 | Standings-column tokens (`Place`, `Name`, `Country`, `Club`, `Team`, `Coach`, `Grade`, `Rank`, `Rating`, `Group`, `Tours`, `Criterias`, `NewRating`) are treated as verified. | All observed in the fixtures. |
 | I8 | Result tokens: `1-0`, `0-1`, `0-0` (both lose), `?-?` (unset). A **draw has no verified token**: it is exported as `?-?` (never as a wrong winner) and reported. | Observed tokens only. |
-| I9 | Bye: `PairingWithBye=true`, the player in `Black`, no `White` element; `Black=-1` means no player. Byes are displayed but not scored. | Observed in `9х9…` and `Б…` fixtures; scoring deferred (spec 0000 §3.2). |
+| I9 | Bye: `PairingWithBye=true`, the player in `Black`, no `White` element; `Black=-1` means no player. Since spec 0001 a bye scores one win and one point. | Observed in `9х9…` and `Б…` fixtures; scoring per spec 0001 §4. |
 | I10 | `FirstMoveColor` `0` = Black (all fixtures; screenshot default). "White first" is stored in the app; on export the original value is kept, otherwise it is reported. | No sample with white first. |
 | I11 | `ForcedPairing` = manual pairing protection. `AllowJigo` (pairing level) = draw allowance. `BoardNumberFixed`, `ResultByReferee`, `Handicap`, and `AdditionalKomi` map by name. | Element names match the legacy pairing editor (screenshot 13). |
 | I12 | Grade maps to the legacy integer `Grade` (`0` = none). Non-numeric grades are app-only. | Only `0` is observed. |
@@ -44,6 +44,24 @@ behavior require a new numbered spec.
 | I23 | `NotPlayingInRound` values that are malformed, out of range, or repeated make the import fail (`xml.invalidValue`) instead of being dropped. | Review P2-04: never lose supported data silently. |
 | I24 | The bind address is configurable (`AUTOKORSAK_BIND`, default `127.0.0.1`). LAN exposure is an explicit, machine-local opt-in through a git-ignored `.env`. | The owner asked for LAN access to the demo machine (2026-10-16); the repository default stays local-only as spec 0000 §8 requires. |
 
+## Spec 0001 decisions (2026-10-16)
+
+The product rules are in spec 0001 (approved by the owner on 2026-10-16). These are implementation choices and
+interpretations within it.
+
+| # | Decision | Rationale |
+|---|---|---|
+| R1 | "Drawn" in the Settings lock means **any** pairing in the sole stage, including a manual one. | Safest reading of §2.1; agreed during spec review. |
+| R2 | A finalized participant whose joining round falls inside a not-yet-drawn round robin, after its start, **blocks the first draw** with an error naming them. | Spec §2.3 "or the referee must explicitly change it"; nobody is silently left out of the roster. |
+| R3 | Berger orientation: the standard FIDE tables, with the first-listed (first-moving) player as **Black**. | Spec §3.1 asks for a standard colour table; in Go, Black moves first. Tests verify the 4- and 6-player tables and colour balance ≤ 1. |
+| R4 | An **unplayed** pairing with the same two players as the fixture is kept whatever its colours. | Keeps a manual colour swap made before play (e.g. for handicap) and avoids ID churn; played games already follow §3.4. |
+| R5 | Generated pairings take board numbers 1…n in fixture order, skipping boards used by kept pairings; the bye takes the next number. | Spec §3.1: existing board conventions. |
+| R6 | A legacy bye with no player (`Black=-1`) awards nothing and raises no notice. | There is no recipient; spec §4 scores the sole real participant. |
+| R7 | The default joining round for a new player is the current round if it has no recorded results, otherwise the next round, adjusted for round-robin stages. A "recorded result" is a pairing whose result is set; a bye with an unset result does not count as one. If no round is left, the API returns `participant.joinRoundRequired`, or the specific round-robin reason when one applies. No round is ever created automatically. | Spec §2.3 and test 20. |
+| R8 | Joining-round constraints for frozen round robins apply to **finalized** participants. Preliminary players may be registered with any round; the constraints are checked when they are finalized (individually or in a batch). | Spec §2.4: finalization is the moment of admission. |
+| R9 | The XML export does **not** write `NotPlayingInRound` for rounds before a late player's joining round; it only reports the joining round as lost. | "Not playing" could trigger legacy skipped-round scoring; spec §6 asks to report, not to invent. |
+| R10 | The "sort by rating within score groups" preference is stored per tournament in browser `localStorage`. | Spec §7.1: a view preference, not tournament data. |
+
 ## Open questions (for the referee / owner)
 
 1. **Legacy `Kind` codes** for round robin, Scheveningen, and McMahon. The legacy settings dialog lists them in the
@@ -56,7 +74,7 @@ behavior require a new numbered spec.
 3. **XML representation** of team, coach, nationality, country, club, rank shift, and the criteria Перемоги
    (McMahon), Очки₂, Дод., Підйом, Зустріч. This needs a legacy sample with these filled in, if exact compatibility
    becomes important.
-4. **Scoring rules** for byes, skipped rounds (the settings exist), draws, both-lose results, and McMahon start
-   scores.
+4. **Scoring rules** for skipped rounds (the settings exist), draws, both-lose results, and McMahon start scores in the
+   official standings (byes are settled by spec 0001).
 5. Whether the exported XML opens in the original AutoKorsak 1.38. It is reimportable here, but it has **not** been
    tested in the legacy application.

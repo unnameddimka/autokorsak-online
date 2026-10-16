@@ -31,7 +31,10 @@ public sealed class Tournament
     public string Name { get; set; } = "";
     public string Description { get; set; } = "";
 
-    /// <summary>Null when imported with a legacy <c>Kind</c> value whose meaning is not verified.</summary>
+    /// <summary>
+    /// The most recently selected pairing system (spec 0001 §2.1). Null when imported with a legacy <c>Kind</c> value
+    /// whose meaning is not verified. Which system governs each round is recorded in <see cref="Stages"/>.
+    /// </summary>
     public TournamentSystem? System { get; set; }
 
     /// <summary>Raw legacy <c>Kind</c> value from an imported file; preserved on export when the system is unchanged.</summary>
@@ -55,6 +58,9 @@ public sealed class Tournament
 
     public List<Participant> Participants { get; set; } = [];
     public List<Round> Rounds { get; set; } = [];
+
+    /// <summary>Ordered pairing stages; empty only in data saved before spec 0001 (see <see cref="EnsureStages"/>).</summary>
+    public List<PairingStage> Stages { get; set; } = [];
 
     public int NextPairingId { get; set; } = 1;
 
@@ -81,6 +87,35 @@ public sealed class Tournament
 
     public IEnumerable<(Round Round, Pairing Pairing)> AllPairings() =>
         Rounds.SelectMany(r => r.Pairings.Select(p => (r, p)));
+
+    /// <summary>Data saved before spec 0001 has no stages: it is one stage from round 1 with the tournament system.</summary>
+    public void EnsureStages()
+    {
+        if (Stages.Count == 0) Stages.Add(new PairingStage { StartRound = 1, System = System });
+        // Sorting bumps the list version, so only sort when needed (callers may be enumerating the stages).
+        for (var i = 1; i < Stages.Count; i++)
+            if (Stages[i - 1].StartRound > Stages[i].StartRound)
+            {
+                Stages.Sort((a, b) => a.StartRound.CompareTo(b.StartRound));
+                break;
+            }
+    }
+
+    public PairingStage StageFor(int round)
+    {
+        EnsureStages();
+        return Stages.Last(s => s.StartRound <= Math.Max(round, 1));
+    }
+
+    /// <summary>Last round governed by <paramref name="stage"/>: the round before the next stage, or the final round.</summary>
+    public int StageEnd(PairingStage stage)
+    {
+        EnsureStages();
+        var next = Stages.FirstOrDefault(s => s.StartRound > stage.StartRound);
+        return next is null ? NumberOfRounds : next.StartRound - 1;
+    }
+
+    public bool HasLaterStage(PairingStage stage) => Stages.Any(s => s.StartRound > stage.StartRound);
 }
 
 public sealed class CriterionSetting
@@ -146,6 +181,8 @@ public sealed class Participant
     public int StartScore { get; set; }
 
     public bool Preliminary { get; set; }
+    /// <summary>First round in which the participant takes part (spec 0001 §2.2). Earlier rounds are not skipped rounds.</summary>
+    public int FirstEligibleRound { get; set; } = 1;
     public List<int> NotPlayingRounds { get; set; } = [];
     public string Comment { get; set; } = "";
 
@@ -157,7 +194,9 @@ public sealed class Participant
         ? local
         : JoinName(Surname, FirstName);
 
-    public bool PlaysInRound(int round) => !NotPlayingRounds.Contains(round);
+    public bool PlaysInRound(int round) => round >= FirstEligibleRound && !NotPlayingRounds.Contains(round);
+
+    public bool HasJoinedBy(int round) => round >= FirstEligibleRound;
 
     private static string JoinName(string surname, string firstName) =>
         string.Join(' ', new[] { surname, firstName }.Where(s => !string.IsNullOrWhiteSpace(s)));
@@ -198,6 +237,9 @@ public sealed class Pairing
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LegacyXml { get; set; }
 
+    /// <summary>A recorded result makes a pairing immutable to automatic pairing and stage changes (spec 0001 §1).</summary>
+    public bool HasRecordedResult => Result != GameResult.Unset;
+
     public IEnumerable<int> PlayerIds()
     {
         if (BlackId is { } b) yield return b;
@@ -205,4 +247,28 @@ public sealed class Pairing
     }
 
     public bool Involves(int participantId) => PlayerIds().Contains(participantId);
+}
+
+/// <summary>
+/// A pairing method effective from <see cref="StartRound"/> until the next stage (spec 0001 §2). Stages control how
+/// pairings are created; they never partition scoring.
+/// </summary>
+public sealed class PairingStage
+{
+    public int StartRound { get; set; } = 1;
+
+    /// <summary>Null for an imported stage whose legacy system is not identified.</summary>
+    public TournamentSystem? System { get; set; }
+
+    /// <summary>Round robin only: participant IDs in Berger starting-number order (index + 1). Null until the first draw.</summary>
+    public List<int>? FrozenRosterIds { get; set; }
+
+    /// <summary>Round robin only: whether the frozen starting numbers were assigned by a random permutation.</summary>
+    public bool RandomStartingNumbers { get; set; }
+
+    [JsonIgnore]
+    public bool IsRoundRobin => System == TournamentSystem.RoundRobin;
+
+    [JsonIgnore]
+    public bool IsFrozen => FrozenRosterIds is not null;
 }

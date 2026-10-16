@@ -118,6 +118,7 @@ public static class LegacyXmlImporter
         foreach (var el in root.Elements("TournamentRound"))
             ReadRound(el, t);
         t.Rounds.Sort((a, b) => a.Number.CompareTo(b.Number));
+        t.EnsureStages(); // legacy XML has one system for the whole tournament: a single initial stage
         return t;
     }
 

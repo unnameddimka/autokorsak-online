@@ -1,8 +1,8 @@
 # Status
 
-**Current version:** spec 0000 (functional UI prototype), 2026-10-16. The first implementation (`0cc16168`) has been
-reviewed and its corrections (`bfe922c8`) accepted on re-review. This version also fixes the one remaining re-review
-P2 and awaits a final re-review before P0 is called complete. The first referee demo follows.
+**Current version:** spec 0001 (pairing stages, round robin, bye scoring, score-group view) on top of spec 0000,
+2026-10-16. Spec 0000 was accepted after review (final version `8fd3898`). Spec 0001 is implemented and awaits
+independent review.
 
 ## What works
 
@@ -21,18 +21,31 @@ P2 and awaits a final re-review before P0 is called complete. The first referee 
   preliminary/final registration, per-round availability, batch finalize, and batch delete of preliminary players
   (players with games are kept and reported).
 - **Pairings:** manual create, edit, delete, swap colors (the result follows the players), bye, result entry
-  including referee decision, handicap/komi/comment, fixed board number, and manual protection. The UI lists the
-  players without a pairing. Automatic pairing is visibly disabled.
+  including referee decision, handicap/komi/comment, fixed board number, and manual protection (not offered in
+  round-robin rounds). The UI lists the players without a pairing and the reason.
+- **Pairing stages (0001):** the effective system per round; "Change pairing system starting from round…" (e.g.
+  round robin, then Swiss), which preserves earlier rounds, is blocked by recorded results in affected rounds, and
+  confirms before deleting unplayed pairings. One continuous tournament and standings across stages.
+- **Round robin (0001):** standard FIDE Berger schedule for the selected round, or for all round-robin rounds.
+  Starting numbers come from registration order, or from one random permutation chosen at the first draw; they are
+  then frozen and shown. Odd rosters get one bye per round. Played games are never changed (a swapped-colour played
+  game is accepted). Replacing unplayed pairings needs confirmation. Swiss, McMahon and Scheveningen generators
+  remain disabled.
+- **Joining rounds (0001):** every participant has a "joins from round" value, with a sensible default and backfill
+  to round 1. Rounds before it are neither pairable nor skipped rounds. Round-robin admission rules are enforced,
+  and "finalize all" finalizes the eligible players and reports skipped ones with reasons.
 - **Rounds:** previous/next/direct selection of the current round, and an "include current round in calculations"
   switch.
 - **Standings:** wins/points, SOS, SODOS, SOSOS, shared places, and per-round opponent/result cells with an
-  optional color marker. They recalculate after every change. Notices explain unsupported situations.
+  optional color marker. A bye counts as one win and one point (0001). They recalculate after every change. Notices
+  explain unsupported situations. The optional **"Sort by rating within score groups"** preparation view (0001)
+  orders players by points from earlier rounds, then rating; the preference is remembered per tournament.
 - **Shared catalog:** search when adding a player, and an explicit upsert with create/update counts, confirmation,
   and a per-player decision for possible namesakes.
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **64 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **97 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
@@ -41,7 +54,16 @@ P2 and awaits a final re-review before P0 is called complete. The first referee 
   rules (double assignment, board uniqueness, preliminary players, availability, no silent game loss, bulk
   delete, round shrink, paired player cannot become preliminary, game → bye conversion, editing imported byes);
   standings notices for explicit absences, empty, unplayed and played rounds, and excluded rounds; rejected invalid `NotPlayingInRound` values; catalog upsert and snapshot independence; API persistence, the import → edit → export →
-  reimport flow, the CSRF header, and that no legacy XML is leaked to the browser.
+  reimport flow, the CSRF header, and that no legacy XML is leaked to the browser. Spec 0001 (`Spec0001Tests` plus
+  an API test): Berger tables for 4 and 6 players, full cycles for 3–12 players with one bye each and colour balance
+  ≤ 1; registration-order and persisted random starting numbers; order-independent and idempotent generation;
+  stage-length checks at generation; immutable played games (swapped colours accepted, conflicts block with zero
+  changes); confirmation for replacements; no protection in round robin; withdrawal via referee-decision results;
+  bye scoring and SOS; round robin → Swiss continuity; stage-change rules; late entrants without false absences;
+  round-robin admission rules; XML export (pure round robin blocked, mixed exported as Kind=2 with reported
+  losses); pre-0001 JSON compatibility; unidentified imported stage; preparation view (earlier rounds only, rating
+  over coefficients); McMahon preparation with start scores and byes; Settings system lock; joining-round
+  defaults; partial batch finalization.
 - Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **10 passed, 0 failed**.
   Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
   Russian-only letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback. Component
@@ -51,12 +73,22 @@ P2 and awaits a final re-review before P0 is called complete. The first referee 
   (create → players → pairing → result → refresh → finalize → upsert → XML download), dialogs in both languages,
   no console errors. After the review fixes: the unsaved-settings prompt, the new Players columns, the disabled
   preliminary option for a paired player, and game → bye conversion with discard confirmation were all checked in
-  the running app.
+  the running app. Spec 0001 (Ukrainian and English): random-number checkbox before the draw, all-round generation
+  with frozen numbers shown, a five-player bye shown as +1 without a warning, no protection checkbox in round-robin
+  rounds, a swapped and played game unchanged after regenerating, the referee-decision flag kept, the locked Settings
+  system, round robin → Swiss from round IV with all-round generation stopping at round III, Swiss generation
+  disabled, a late entrant defaulting to round IV and unavailable in round II, and the preparation view ordering by
+  score group, then rating. No page errors.
 
 ## Known limitations
 
-- Byes, skipped rounds, draws, both-lose results, and McMahon start scores are not scored correctly yet. They are
-  flagged with notices. The calculation settings are stored but have no effect.
+- Skipped rounds, draws, both-lose results, and McMahon start scores in the official standings are not scored
+  correctly yet. They are flagged with notices. The calculation settings are stored but have no effect.
+- Automatic Swiss, McMahon and Scheveningen pairing is not implemented. Moving or removing stage boundaries, and a
+  round-robin stage after another system, are deferred (spec 0001 §1.1).
+- A pure round-robin tournament cannot be exported to legacy XML (round-robin `Kind` code unverified). A round robin
+  followed by Swiss exports as Swiss; stages, starting numbers and joining rounds are reported as lost.
+- McMahon start scores cannot be edited in the UI (imported values only).
 - Ranking criteria other than wins/points, SOS, SODOS, and SOSOS are stored but not calculated, and are excluded
   from ordering.
 - "Derive rank from rating" is stored only; ranks are entered manually (mapping unconfirmed).
@@ -75,9 +107,9 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Independent re-review of the corrections (see the review log and `docs/review/`).
-2. First demo with the referee. Collect answers to the open questions in `docs/decisions.md` (Kind codes,
-   rating → rank, scoring of byes and skipped rounds).
+1. Independent review of the spec 0001 implementation.
+2. Referee demo of the round-robin and stage-change flows. Collect answers to the open questions in
+   `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
 3. Spec 0001 for the next scope (likely candidates: bye and skipped-round scoring, automatic Swiss/McMahon
    pairing).
 

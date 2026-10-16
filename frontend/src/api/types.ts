@@ -41,6 +41,7 @@ export interface Participant {
   egdPin: number;
   startScore: number;
   preliminary: boolean;
+  firstEligibleRound: number;
   notPlayingRounds: number[];
   comment: string;
   displayName: string;
@@ -65,6 +66,14 @@ export interface Pairing {
 
 export interface Round { number: number; pairings: Pairing[] }
 
+export interface PairingStage {
+  startRound: number;
+  /** Null for an imported stage whose legacy system is not identified. */
+  system: TournamentSystem | null;
+  frozenRosterIds: number[] | null;
+  randomStartingNumbers: boolean;
+}
+
 export interface Tournament {
   id: string;
   name: string;
@@ -86,6 +95,7 @@ export interface Tournament {
   includeCurrentRound: boolean;
   participants: Participant[];
   rounds: Round[];
+  stages: PairingStage[];
   createdAt: string;
   updatedAt: string;
 }
@@ -94,6 +104,8 @@ export interface TournamentView {
   tournament: Tournament;
   imported: boolean;
   gameCounts: Record<string, number>;
+  systemLocked: boolean;
+  defaultJoinRound: number | null;
   result?: unknown;
 }
 
@@ -109,11 +121,11 @@ export type ParticipantInput = Pick<
   Participant,
   | 'localFirstName' | 'localSurname' | 'firstName' | 'surname' | 'rating' | 'rank' | 'rankShift' | 'grade' | 'country'
   | 'club' | 'nationality' | 'team' | 'coach' | 'preliminary' | 'notPlayingRounds' | 'comment' | 'catalogEntryId'
->;
+> & { firstEligibleRound: number | null };
 
 export type PairingInput = Omit<Pairing, 'id' | 'legacyResultToken' | 'boardNumber'> & { boardNumber: number | null };
 
-export type CellKind = 'none' | 'game' | 'bye' | 'notPlaying';
+export type CellKind = 'none' | 'game' | 'bye' | 'notPlaying' | 'notJoined';
 export type CellOutcome = 'unset' | 'win' | 'loss' | 'draw' | 'bothLose' | 'unknown';
 
 export interface RoundCell {
@@ -142,6 +154,21 @@ export interface Standings {
   rows: StandingRow[];
   notices: string[];
 }
+
+export interface PreparationRow { position: number; participantId: number; groupScore: number; rounds: RoundCell[] }
+
+export interface Preparation {
+  round: number;
+  system: TournamentSystem | null;
+  displayedRounds: number[];
+  scoredRounds: number[];
+  rows: PreparationRow[];
+  notices: string[];
+}
+
+export interface GenerationResult { rounds: number[]; created: number; replaced: number; kept: number; rosterFrozen: boolean }
+export interface SkippedParticipant { id: number; name: string; code: string; args: Record<string, unknown> }
+export interface FinalizeResult { finalized: number[]; skipped: SkippedParticipant[] }
 
 export interface CatalogEntry {
   id: string;

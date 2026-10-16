@@ -1,5 +1,5 @@
 import type {
-  CatalogEntry, ExportReport, PairingInput, ParticipantInput, SettingsInput, Standings, TournamentSummary,
+  CatalogEntry, Preparation, TournamentSystem, ExportReport, PairingInput, ParticipantInput, SettingsInput, Standings, TournamentSummary,
   TournamentView, UpsertDecision, UpsertPlan,
 } from './types';
 
@@ -88,6 +88,11 @@ export const api = {
   setRound: (id: string, currentRound: number, includeCurrentRound: boolean) =>
     request<TournamentView>('PUT', `${t(id)}/round`, { currentRound, includeCurrentRound }),
   standings: (id: string) => request<Standings>('GET', `${t(id)}/standings`),
+  preparation: (id: string) => request<Preparation>('GET', `${t(id)}/standings/preparation`),
+  changeSystem: (id: string, startRound: number, system: TournamentSystem, confirmDeleteUnplayed = false) =>
+    request<TournamentView>('POST', `${t(id)}/stages`, { startRound, system, confirmDeleteUnplayed }),
+  generate: (id: string, round: number, options: { allRounds: boolean; randomStartingNumbers: boolean; confirmReplace?: boolean }) =>
+    request<TournamentView>('POST', `${t(id)}/rounds/${round}/generate`, { confirmReplace: false, ...options }),
 
   addParticipant: (id: string, input: ParticipantInput) => request<TournamentView>('POST', `${t(id)}/participants`, input),
   updateParticipant: (id: string, pid: number, input: ParticipantInput) =>

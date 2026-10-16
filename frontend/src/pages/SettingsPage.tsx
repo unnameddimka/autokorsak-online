@@ -45,6 +45,7 @@ export function NewTournamentPage() {
       <SettingsForm
         initial={defaults()}
         legacyKind={null}
+        systemLocked={false}
         submitLabel={t('tournament.create')}
         onSubmit={async (input) => {
           const view = await api.createTournament(input);
@@ -57,7 +58,7 @@ export function NewTournamentPage() {
 }
 
 export function TournamentSettingsPage() {
-  const { tournament, run } = useTournament();
+  const { tournament, view, run } = useTournament();
   const { t } = useI18n();
   const toast = useToast();
   return (
@@ -65,6 +66,7 @@ export function TournamentSettingsPage() {
       key={tournament.updatedAt}
       initial={fromTournament(tournament)}
       legacyKind={tournament.legacyKind}
+      systemLocked={view.systemLocked}
       submitLabel={t('common.save')}
       onSubmit={async (input) => {
         await run(() => api.updateSettings(tournament.id, input));
@@ -74,9 +76,10 @@ export function TournamentSettingsPage() {
   );
 }
 
-function SettingsForm({ initial, legacyKind, submitLabel, onSubmit, onCancel }: {
+function SettingsForm({ initial, legacyKind, systemLocked, submitLabel, onSubmit, onCancel }: {
   initial: SettingsInput;
   legacyKind: number | null;
+  systemLocked: boolean;
   submitLabel: string;
   onSubmit: (input: SettingsInput) => Promise<void>;
   onCancel?: () => void;
@@ -149,7 +152,7 @@ function SettingsForm({ initial, legacyKind, submitLabel, onSubmit, onCancel }: 
       {error !== null && <Notice kind="error">{errorMessage(error, tk)}</Notice>}
 
       <div className="settings-panel">
-        {tab === 'general' && <GeneralTab form={form} set={set} legacyKind={legacyKind} />}
+        {tab === 'general' && <GeneralTab form={form} set={set} legacyKind={legacyKind} systemLocked={systemLocked} />}
         {tab === 'criteria' && (
           <OrderedList
             intro={t('settings.criteriaIntro')}
@@ -246,10 +249,11 @@ function SettingsForm({ initial, legacyKind, submitLabel, onSubmit, onCancel }: 
   );
 }
 
-function GeneralTab({ form, set, legacyKind }: {
+function GeneralTab({ form, set, legacyKind, systemLocked }: {
   form: SettingsInput;
   set: <K extends keyof SettingsInput>(key: K, value: SettingsInput[K]) => void;
   legacyKind: number | null;
+  systemLocked: boolean;
 }) {
   const { t } = useI18n();
   const boardSizes = BOARD_SIZES.includes(form.boardSize) ? BOARD_SIZES : [...BOARD_SIZES, form.boardSize].sort((a, b) => a - b);
@@ -283,16 +287,17 @@ function GeneralTab({ form, set, legacyKind }: {
         <legend className="field-label">{t('settings.system')}</legend>
         {SYSTEMS.map((s) => (
           <label key={s} className="checkbox">
-            <input type="radio" name="system" checked={form.system === s} onChange={() => changeSystem(s)} />
+            <input type="radio" name="system" checked={form.system === s} disabled={systemLocked} onChange={() => changeSystem(s)} />
             <span>{t(`system.${s}` as MessageKey)}</span>
           </label>
         ))}
         {legacyKind !== null && legacyKind !== LEGACY_SWISS_KIND && (
           <label className="checkbox">
-            <input type="radio" name="system" checked={form.system === null} onChange={() => changeSystem(null)} />
+            <input type="radio" name="system" checked={form.system === null} disabled={systemLocked} onChange={() => changeSystem(null)} />
             <span>{t('system.legacyUnverified', { code: legacyKind })}</span>
           </label>
         )}
+        {systemLocked && <span className="field-hint">{t('settings.systemLocked')}</span>}
         <span className="field-hint">{form.system === null || form.system === 'swiss' ? t('settings.systemHint') : t('settings.systemExportHint')}</span>
       </fieldset>
 

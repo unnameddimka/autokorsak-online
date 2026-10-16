@@ -171,6 +171,40 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Round_robin_generation_stage_change_and_preparation_endpoints()
+    {
+        var client = _factory.Client();
+        var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin, 7), Json));
+        var id = created["tournament"]!["id"]!.GetValue<string>();
+        for (var i = 1; i <= 4; i++)
+            await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
+
+        // 7 rounds for 4 players: generating needs a later stage first.
+        var mismatch = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true }, Json);
+        Assert.Equal("generate.roundCountMismatch", await ErrorCode(mismatch));
+
+        var staged = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/stages", new { startRound = 4, system = "swiss" }, Json));
+        Assert.Equal("swiss", staged["tournament"]!["system"]!.GetValue<string>());
+        Assert.True(staged["systemLocked"]!.GetValue<bool>());
+
+        var generated = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/2/generate",
+            new { allRounds = true, randomStartingNumbers = true }, Json));
+        Assert.Equal(6, generated["result"]!["created"]!.GetValue<int>());
+        var stage = generated["tournament"]!["stages"]![0]!;
+        Assert.True(stage["randomStartingNumbers"]!.GetValue<bool>());
+        Assert.Equal(4, stage["frozenRosterIds"]!.AsArray().Count);
+
+        var swissRound = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/4/generate", new { }, Json);
+        Assert.Equal("generate.notAvailable", await ErrorCode(swissRound));
+
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/round", new { currentRound = 2, includeCurrentRound = true }, Json));
+        var preparation = await Body(await client.GetAsync($"/api/tournaments/{id}/standings/preparation"));
+        Assert.Equal(2, preparation["round"]!.GetValue<int>());
+        Assert.Equal(4, preparation["rows"]!.AsArray().Count);
+    }
+
+    [Fact]
     public async Task Mutations_without_client_header_are_refused()
     {
         var client = _factory.CreateClient();

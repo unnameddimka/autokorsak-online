@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api/client';
-import type { Participant, UpsertDecision, UpsertOutcome, UpsertPlan } from '../api/types';
+import type { FinalizeResult, Participant, UpsertDecision, UpsertOutcome, UpsertPlan } from '../api/types';
 import { Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import { errorMessage, formatRank, roman } from '../format';
@@ -9,7 +9,7 @@ import { PlayerEditor } from './PlayerEditor';
 
 export function PlayersPage() {
   const { tournament, view, run } = useTournament();
-  const { t } = useI18n();
+  const { t, tk } = useI18n();
   const toast = useToast();
   const confirm = useConfirm();
   const [editing, setEditing] = useState<Participant | 'new' | null>(null);
@@ -25,8 +25,14 @@ export function PlayersPage() {
     });
     if (!ok) return;
     try {
-      await run(() => api.finalizePreliminary(tournament.id));
-      toast.success(t('players.finalizedDone', { count: preliminaryCount }));
+      const next = await run(() => api.finalizePreliminary(tournament.id));
+      const report = next.result as FinalizeResult;
+      // Partial success (spec 0001 §2.4): report finalized players and every skipped one with its reason.
+      if (report.finalized.length > 0) toast.success(t('players.finalizedDone', { count: report.finalized.length }));
+      if (report.skipped.length > 0) {
+        const lines = report.skipped.map((s) => `${s.name}: ${tk(`error.${s.code}`, 'error.unknown', s.args)}`);
+        toast.warning(t('players.finalizeSkipped', { count: report.skipped.length, details: lines.join(' ') }));
+      }
     } catch (e) { toast.error(e); }
   }
 
@@ -78,6 +84,7 @@ export function PlayersPage() {
               <th>{t('field.team')}</th>
               <th>{t('field.coach')}</th>
               <th>{t('players.registration')}</th>
+              <th>{t('players.joinsShort')}</th>
               <th>{t('field.availability')}</th>
               <th className="num">{t('players.games')}</th>
               <th>{t('field.comment')}</th>
@@ -101,6 +108,7 @@ export function PlayersPage() {
                 <td>{p.preliminary
                   ? <span className="badge badge-warning">{t('player.registrationPreliminary')}</span>
                   : <span className="badge badge-ok">{t('player.registrationFinal')}</span>}</td>
+                <td>{roman(p.firstEligibleRound)}</td>
                 <td className="availability">
                   {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => {
                     const plays = !p.notPlayingRounds.includes(r);

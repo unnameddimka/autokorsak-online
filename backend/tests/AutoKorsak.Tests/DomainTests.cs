@@ -62,12 +62,21 @@ public class StandingsTests
         Assert.Equal(3m, s.Rows.Single(r => r.ParticipantId == t.ByName("Медведський Іван").Id).Values[CriterionKeys.Wins]);
     }
 
+    // Spec 0001 §4 replaced the 0000 "byes not scored" notice: a bye is one win and one point.
     [Fact]
-    public void Unsupported_situations_are_reported()
+    public void Imported_byes_are_scored_without_a_warning()
     {
-        var t = Fixtures.Import(Fixtures.ByeRelativePath);
+        var t = Fixtures.Import(Fixtures.OddPlayersRelativePath);
         var s = StandingsCalculator.Calculate(t);
-        Assert.Contains(StandingsCalculator.NoticeByes, s.Notices);
+        var byeCells = s.Rows.SelectMany(r => r.Rounds.Where(c => c.Kind == CellKind.Bye).Select(_ => r.ParticipantId)).ToList();
+        Assert.NotEmpty(byeCells);
+        foreach (var row in s.Rows)
+        {
+            var games = row.Rounds.Count(c => c.Kind == CellKind.Game && c.Outcome == CellOutcome.Win);
+            var byes = row.Rounds.Count(c => c.Kind == CellKind.Bye);
+            Assert.Equal(games + byes, row.Values[CriterionKeys.Wins]);
+        }
+        Assert.DoesNotContain("byesNotScored", s.Notices);
     }
 
     // Explicit absence vs. ordinary missing pairing (re-review of bfe922c8).
@@ -181,7 +190,7 @@ public class EditorRuleTests
         var ex = Assert.Throws<DomainException>(() => TournamentEditor.AddPairing(t, 1, Pair(a.Id, p.Id)));
         Assert.Equal("pairing.playerPreliminary", ex.Code);
 
-        Assert.Equal(1, TournamentEditor.FinalizeAllPreliminary(t));
+        Assert.Equal([p.Id], TournamentEditor.FinalizeAllPreliminary(t).Finalized);
         TournamentEditor.AddPairing(t, 1, Pair(a.Id, p.Id));
     }
 
