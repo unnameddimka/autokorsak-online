@@ -489,6 +489,9 @@ export const en = {
   'error.generate.participantJoinsMidRoundRobin': 'These players are finally registered but join in the middle of the round robin (it starts in round {start}): {names}. Set their joining round to the round-robin start, or make them preliminary.',
   'error.generate.replaceUnplayed': '{count} unplayed pairings in rounds {rounds} do not match the round-robin schedule and will be replaced. Pairings with results are never changed.',
   'error.generate.playedPairingConflicts': 'Round {round}, board {board}: a game with a recorded result does not match the round-robin schedule. Nothing was changed; correct that game manually first.',
+  'player.notJoinedYet': 'not yet joined',
+  'player.rosterRoundsLocked': 'Availability in round-robin rounds is fixed for this player. For a withdrawal, enter technical results by referee decision.',
+  'error.participant.rosterMemberUnavailable': 'The player is part of a drawn round robin, so they cannot be marked as not playing in round {round}. For a withdrawal, enter technical results with “Result by referee decision”.',
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -38,7 +38,7 @@ public static class PairingSchedule
         if (t.StageFor(startRound).System == target) throw new DomainException("stage.sameSystem");
 
         var affected = t.Rounds.Where(r => r.Number >= startRound).ToList();
-        var played = affected.Where(r => r.Pairings.Any(p => p.HasRecordedResult)).Select(r => r.Number).ToList();
+        var played = affected.Where(r => r.Pairings.Any(p => p.HasAwardedOutcome)).Select(r => r.Number).ToList();
         if (played.Count > 0)
             throw DomainException.Conflict("stage.roundsHaveResults", Args(("rounds", RoundList(played))));
         var unplayed = affected.Where(r => r.Pairings.Count > 0).ToList();
@@ -146,6 +146,7 @@ public static class PairingSchedule
             stage.RandomStartingNumbers = randomStartingNumbers;
         }
         var created = 0;
+        t.PairingsEverDrawn = true;
         foreach (var plan in plans)
         {
             var r = t.GetRound(plan.Number);
@@ -199,9 +200,10 @@ public static class PairingSchedule
     }
 
     /// <summary>
-    /// Reconciles a round with its fixture. Played pairings are immutable: they must match a fixture slot (same two
-    /// players in either colour, or the same bye) or the request fails. Unplayed pairings matching a slot are kept;
-    /// other unplayed pairings are replaced (after confirmation).
+    /// Reconciles a round with its fixture. Pairings with an awarded outcome are immutable: a played game must match a
+    /// slot with the same two players in either colour, and a credited bye must be the fixture's bye; otherwise the
+    /// request fails. Unplayed games are kept only in the exact Berger orientation; others are replaced (after
+    /// confirmation).
     /// </summary>
     private static RoundPlan PlanRound(Tournament t, int number, List<Slot> fixture)
     {
@@ -210,15 +212,15 @@ public static class PairingSchedule
         var remove = new List<Pairing>();
         var kept = 0;
 
-        foreach (var p in existing.OrderByDescending(p => p.HasRecordedResult))
+        foreach (var p in existing.OrderByDescending(p => p.HasAwardedOutcome))
         {
-            var match = open.FirstOrDefault(s => Matches(p, s));
+            var match = open.FirstOrDefault(s => Matches(p, s, anyColour: p.HasRecordedResult));
             if (match is not null)
             {
                 open.Remove(match);
                 kept++;
             }
-            else if (p.HasRecordedResult)
+            else if (p.HasAwardedOutcome)
             {
                 throw DomainException.Conflict("generate.playedPairingConflicts", Args(("round", number), ("board", p.BoardNumber)));
             }
@@ -230,11 +232,11 @@ public static class PairingSchedule
         return new RoundPlan(number, remove, open, kept);
     }
 
-    private static bool Matches(Pairing p, Slot s) =>
+    private static bool Matches(Pairing p, Slot s, bool anyColour) =>
         s.White is null
             ? p.IsBye && p.BlackId == s.Black
             : !p.IsBye && p.BlackId is { } b && p.WhiteId is { } w
-              && ((b == s.Black && w == s.White) || (b == s.White && w == s.Black));
+              && ((b == s.Black && w == s.White) || (anyColour && b == s.White && w == s.Black));
 
     private static int Mod(int a, int m) => ((a % m) + m) % m;
 

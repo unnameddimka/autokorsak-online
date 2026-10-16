@@ -71,10 +71,13 @@ cannot add it without a CORS preflight, and the server never approves preflights
   re-assigned without confirmation; a player with games cannot be deleted; the round count cannot drop below the
   last paired round.
 - Spec 0001 rules:
-  - **A pairing with a recorded result is never changed** by generation or a stage change.
-  - The Settings system selector is locked once any pairing exists or there is a second stage.
+  - **A pairing with an awarded outcome is never changed** by generation or a stage change. An awarded outcome is a
+    recorded result or a credited bye (`HasAwardedOutcome`). Deleting or reassigning such a pairing by hand needs
+    confirmation.
+  - The Settings system selector is locked once any pairing has ever been drawn (`PairingsEverDrawn`, monotonic), a
+    round-robin roster is frozen, or there is a second stage.
   - A frozen round-robin roster never gains or loses members. Its members cannot become preliminary, be deleted,
-    or join later than the stage start.
+    join later than the stage start, or be marked unavailable in that stage.
   - Admitting a player (adding or finalizing) while a round robin is frozen requires a joining round after that
     stage. Before the draw, round-robin entrants must join at the stage start.
   - Round-robin rounds have no manual protection.
@@ -111,9 +114,9 @@ reuse it.
   1. Resolve the roster: the frozen one, or the finalized players joining by the stage start, in ID order or one
      random permutation.
   2. Check the stage length: exactly one cycle for a final stage, at most one cycle otherwise.
-  3. Plan every requested round. Played pairings must match a slot (same two players in either colour, or the same
-     bye) or the whole request fails. Matching unplayed pairings are kept; other unplayed pairings are replaced,
-     after confirmation.
+  3. Plan every requested round. Pairings with an awarded outcome must match a slot (a played game: same two
+     players in either colour; a credited bye: the fixture bye) or the whole request fails. Unplayed games are kept
+     only in the exact Berger orientation; other unplayed pairings are replaced, after confirmation.
   4. Only then mutate: freeze the roster, delete, and create.
 
   Failures leave nothing behind, because the service saves only after the operation succeeds.

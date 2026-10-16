@@ -180,8 +180,9 @@ tr.row-muted td { color: var(--muted); }
 .winner-star { color: #d39b16; }
 .flag { margin-left: 0.3rem; font-size: 0.8rem; color: var(--muted); }
 .availability { white-space: nowrap; letter-spacing: 0.1rem; }
-.avail.yes { color: var(--ok); }
-.avail.no { color: #bbb; }
+.avail.plays { color: var(--ok); }
+.avail.notPlaying { color: #bbb; }
+.avail.notJoined { color: #d4cfc4; }
 
 .unpaired { margin-top: 1rem; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 0.8rem 1rem; }
 .unpaired p { margin: 0.25rem 0; }

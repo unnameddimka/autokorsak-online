@@ -146,7 +146,7 @@ public static partial class TournamentEditor
     public static bool IsSystemLocked(Tournament t)
     {
         t.EnsureStages();
-        return t.Stages.Count > 1 || t.Rounds.Any(r => r.Pairings.Count > 0);
+        return t.Stages.Count > 1 || t.PairingsEverDrawn || t.Stages.Any(s => s.IsFrozen) || t.Rounds.Any(r => r.Pairings.Count > 0);
     }
 
     public static void SetCurrentRound(Tournament t, int currentRound, bool includeCurrentRound)
@@ -218,8 +218,14 @@ public static partial class TournamentEditor
 
             // Marking a player unavailable for a round they are already paired in would leave an invalid pairing.
             foreach (var r in notPlaying.Where(r => !p.NotPlayingRounds.Contains(r)))
+            {
                 if (t.Rounds.FirstOrDefault(x => x.Number == r)?.Pairings.Any(x => x.Involves(p.Id)) == true)
                     throw DomainException.Conflict("participant.pairedInRound", Args(("round", r)));
+                // A frozen round-robin schedule must stay generatable (spec 0001 §2.3); withdrawals use
+                // referee-decision results instead (§5.3).
+                if (t.StageFor(r).FrozenRosterIds?.Contains(p.Id) == true)
+                    throw DomainException.Conflict("participant.rosterMemberUnavailable", Args(("round", r)));
+            }
         }
 
         p.LocalFirstName = localFirst;
@@ -280,8 +286,9 @@ public static partial class TournamentEditor
 
     // ---------- joining round and round-robin roster rules (spec 0001 §2.2–2.4) ----------
 
+    /// <summary>True when any pairing of the round already credits an outcome, including a bye (spec 0001 §2.2).</summary>
     public static bool RoundHasResults(Tournament t, int round) =>
-        t.Rounds.FirstOrDefault(r => r.Number == round)?.Pairings.Any(p => p.HasRecordedResult) == true;
+        t.Rounds.FirstOrDefault(r => r.Number == round)?.Pairings.Any(p => p.HasAwardedOutcome) == true;
 
     /// <summary>
     /// Proposed joining round for a newly admitted participant: the current round if it has no recorded results,
@@ -377,6 +384,7 @@ public static partial class TournamentEditor
         var pairing = new Pairing { Id = t.NextPairingId };
         ApplyPairing(t, round, pairing, input, isNew: true);
         t.NextPairingId++;
+        t.PairingsEverDrawn = true;
         round.Pairings.Add(pairing);
         round.Pairings.Sort((a, b) => a.BoardNumber.CompareTo(b.BoardNumber));
         return pairing;
@@ -385,7 +393,7 @@ public static partial class TournamentEditor
     public static Pairing UpdatePairing(Tournament t, int pairingId, PairingInput input, bool confirmDiscardResult)
     {
         var (round, pairing) = FindPairing(t, pairingId);
-        if (pairing.Result != GameResult.Unset && !confirmDiscardResult && !SameGame(pairing, input))
+        if (pairing.HasAwardedOutcome && !confirmDiscardResult && !SameGame(pairing, input))
             throw DomainException.Conflict("pairing.resultWouldBeDiscarded");
         ApplyPairing(t, round, pairing, input, isNew: false);
         round.Pairings.Sort((a, b) => a.BoardNumber.CompareTo(b.BoardNumber));
@@ -395,7 +403,7 @@ public static partial class TournamentEditor
     public static void DeletePairing(Tournament t, int pairingId, bool confirmDiscardResult)
     {
         var (round, pairing) = FindPairing(t, pairingId);
-        if (pairing.Result != GameResult.Unset && !confirmDiscardResult)
+        if (pairing.HasAwardedOutcome && !confirmDiscardResult)
             throw DomainException.Conflict("pairing.resultWouldBeDiscarded");
         round.Pairings.Remove(pairing);
     }

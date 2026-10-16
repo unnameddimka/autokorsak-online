@@ -576,6 +576,126 @@ public class Spec0001Tests
         Assert.Equal(4, report.Skipped.Single().Args["round"]);
     }
 
+    // ---------- review of e7b57590 ----------
+
+    // P1-01
+    [Fact]
+    public void Frozen_roster_member_cannot_become_unavailable_in_a_round_robin_round()
+    {
+        var t = RoundRobin(4);
+        Generate(t, 1); // freezes the roster; round 2 not drawn yet
+        var member = t.FindParticipant(2)!;
+        var before = Json(t);
+
+        var ex = Assert.Throws<DomainException>(() =>
+            TournamentEditor.UpdateParticipant(t, member.Id, Player("P2", rating: member.Rating) with { NotPlayingRounds = [2] }));
+
+        Assert.Equal("participant.rosterMemberUnavailable", ex.Code);
+        Assert.True(ex.IsConflict);
+        Assert.Equal(before, Json(t));
+        Generate(t, 1, all: true); // the schedule stays generatable
+        Assert.Equal(3, t.Rounds.Count(r => r.Pairings.Count == 2));
+    }
+
+    [Fact]
+    public void Availability_after_a_round_robin_stage_stays_editable_for_roster_members()
+    {
+        var t = RoundRobin(4, rounds: 7);
+        PairingSchedule.ChangeSystem(t, 4, TournamentSystem.Swiss, false);
+        Generate(t, 1);
+        var updated = TournamentEditor.UpdateParticipant(t, 2, Player("P2", rating: 1980) with { NotPlayingRounds = [5] });
+        Assert.Equal([5], updated.NotPlayingRounds);
+    }
+
+    // P2-01
+    [Fact]
+    public void Settings_system_lock_is_remembered_after_all_pairings_are_deleted()
+    {
+        var t = RoundRobin(4);
+        Generate(t, 1);
+        foreach (var (_, p) in t.AllPairings().ToList()) TournamentEditor.DeletePairing(t, p.Id, false);
+        Assert.Empty(t.AllPairings());
+
+        var reloaded = Clone(t);
+        Assert.True(TournamentEditor.IsSystemLocked(reloaded));
+        Assert.Equal("settings.systemLocked",
+            Assert.Throws<DomainException>(() => TournamentEditor.UpdateSettings(reloaded, Settings("RR", TournamentSystem.Swiss, 3))).Code);
+
+        var swiss = TournamentEditor.Create(Settings("Swiss", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        TournamentEditor.AddParticipant(swiss, Player("A"));
+        TournamentEditor.AddParticipant(swiss, Player("B"));
+        var manual = TournamentEditor.AddPairing(swiss, 1, Pair(1, 2));
+        TournamentEditor.DeletePairing(swiss, manual.Id, false);
+        Assert.True(TournamentEditor.IsSystemLocked(Clone(swiss)));
+    }
+
+    // P2-02
+    [Fact]
+    public void Unplayed_pairing_with_swapped_colours_is_restored_only_after_confirmation()
+    {
+        var t = RoundRobin(4);
+        Generate(t, 1);
+        var p = t.Rounds[0].Pairings[0]; // 1-4
+        TournamentEditor.UpdatePairing(t, p.Id, new PairingInput(p.WhiteId, p.BlackId, false, p.BoardNumber, false, 0, 0, false, GameResult.Unset, false, "", false), false);
+        var before = Json(t);
+
+        var ex = Assert.Throws<DomainException>(() => Generate(t, 1));
+        Assert.Equal("generate.replaceUnplayed", ex.Code);
+        Assert.Equal(before, Json(t));
+
+        Generate(t, 1, confirm: true);
+        Assert.Equal([(1, (int?)4), (2, 3)], Fixture(t, 1));
+    }
+
+    // P2-03
+    [Fact]
+    public void A_credited_bye_counts_as_an_outcome_for_joining_defaults()
+    {
+        var t = TournamentEditor.Create(Settings("Swiss", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        var a = TournamentEditor.AddParticipant(t, Player("A"));
+        TournamentEditor.AddPairing(t, 1, Pair(a.Id, 0) with { IsBye = true, WhiteId = null });
+        Assert.True(TournamentEditor.RoundHasResults(t, 1));
+        Assert.Equal(2, TournamentEditor.AddParticipant(t, Player("B")).FirstEligibleRound);
+    }
+
+    [Fact]
+    public void A_credited_bye_blocks_a_stage_change_and_needs_confirmation_to_delete()
+    {
+        var t = TournamentEditor.Create(Settings("Swiss", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        var a = TournamentEditor.AddParticipant(t, Player("A"));
+        var bye = TournamentEditor.AddPairing(t, 3, Pair(a.Id, 0) with { IsBye = true, WhiteId = null });
+        var before = Json(t);
+
+        Assert.Equal("stage.roundsHaveResults",
+            Assert.Throws<DomainException>(() => PairingSchedule.ChangeSystem(t, 3, TournamentSystem.McMahon, true)).Code);
+        Assert.Equal(before, Json(t));
+        Assert.Equal("pairing.resultWouldBeDiscarded",
+            Assert.Throws<DomainException>(() => TournamentEditor.DeletePairing(t, bye.Id, false)).Code);
+    }
+
+    [Fact]
+    public void A_credited_bye_that_conflicts_with_the_schedule_blocks_generation()
+    {
+        var t = RoundRobin(3); // round 1 fixture: bye for player 1, game 2-3
+        TournamentEditor.AddPairing(t, 1, Pair(2, 0) with { IsBye = true, WhiteId = null });
+        var before = Json(t);
+
+        var ex = Assert.Throws<DomainException>(() => Generate(t, 1, confirm: true));
+
+        Assert.Equal("generate.playedPairingConflicts", ex.Code);
+        Assert.Equal(before, Json(t));
+    }
+
+    [Fact]
+    public void The_fixture_bye_is_kept_when_regenerating_an_odd_round_robin()
+    {
+        var t = RoundRobin(5);
+        Generate(t, 1, all: true);
+        var byes = t.AllPairings().Where(x => x.Pairing.IsBye).Select(x => x.Pairing.Id).ToList();
+        Generate(t, 1, all: true);
+        Assert.Equal(byes, t.AllPairings().Where(x => x.Pairing.IsBye).Select(x => x.Pairing.Id).ToList());
+    }
+
     private sealed class StandingsComparer : IEqualityComparer<StandingsResult>
     {
         public bool Equals(StandingsResult? x, StandingsResult? y) =>

@@ -1,5 +1,5 @@
 import { ApiError } from './api/client';
-import type { GameResult, PairingStage, Tournament, TournamentSystem } from './api/types';
+import type { GameResult, PairingStage, Participant, Tournament, TournamentSystem } from './api/types';
 import type { MessageKey } from './i18n/en';
 
 type T = (key: MessageKey, params?: Record<string, unknown>) => string;
@@ -52,6 +52,19 @@ export function errorMessage(error: unknown, tk: TK): string {
 export function stageFor(t: Tournament, round: number): PairingStage {
   const stages = t.stages.length > 0 ? t.stages : [{ startRound: 1, system: t.system, frozenRosterIds: null, randomStartingNumbers: false }];
   return [...stages].reverse().find((s) => s.startRound <= round) ?? stages[0];
+}
+
+export type RoundParticipation = 'notJoined' | 'notPlaying' | 'plays';
+
+/** How a participant stands in a round, for display: before the joining round they have not joined yet. */
+export function roundParticipation(p: Pick<Participant, 'firstEligibleRound' | 'notPlayingRounds'>, round: number): RoundParticipation {
+  if (round < p.firstEligibleRound) return 'notJoined';
+  return p.notPlayingRounds.includes(round) ? 'notPlaying' : 'plays';
+}
+
+/** Rounds in which a frozen round-robin member's availability is fixed (the server refuses changes there). */
+export function isLockedRosterRound(t: Tournament, participantId: number, round: number): boolean {
+  return stageFor(t, round).frozenRosterIds?.includes(participantId) === true;
 }
 
 export function stageEnd(t: Tournament, stage: PairingStage): number {

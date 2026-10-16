@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client';
 import type { CatalogEntry, Participant, ParticipantInput } from '../api/types';
 import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, RANK_OPTIONS, roman } from '../format';
+import { errorMessage, formatRank, isLockedRosterRound, RANK_OPTIONS, roman } from '../format';
 import { useTournament } from './TournamentLayout';
 
 const EMPTY: ParticipantInput = {
@@ -164,9 +164,13 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
 
         <fieldset className="field field-wide">
           <legend className="field-label">{t('field.availability')}</legend>
+          {!isNew && tournament.stages.some((s) => s.frozenRosterIds?.includes(participant.id)) && (
+            <span className="field-hint">{t('player.rosterRoundsLocked')}</span>
+          )}
           <div className="inline-options">
             {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((round) => (
-              <Checkbox key={round} label={roman(round)} disabled={round < (form.firstEligibleRound ?? 1)}
+              <Checkbox key={round} label={roman(round)}
+                disabled={round < (form.firstEligibleRound ?? 1) || (!isNew && isLockedRosterRound(tournament, participant.id, round))}
                 checked={round >= (form.firstEligibleRound ?? 1) && !form.notPlayingRounds.includes(round)} onChange={(v) => toggleRound(round, v)} />
             ))}
           </div>

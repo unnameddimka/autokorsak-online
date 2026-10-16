@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import type { FinalizeResult, Participant, UpsertDecision, UpsertOutcome, UpsertPlan } from '../api/types';
 import { Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, roman } from '../format';
+import { errorMessage, formatRank, roman, roundParticipation } from '../format';
 import { useTournament } from './TournamentLayout';
 import { PlayerEditor } from './PlayerEditor';
 
@@ -111,11 +111,11 @@ export function PlayersPage() {
                 <td>{roman(p.firstEligibleRound)}</td>
                 <td className="availability">
                   {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => {
-                    const plays = !p.notPlayingRounds.includes(r);
+                    const state = roundParticipation(p, r);
+                    const label = state === 'plays' ? t('player.plays') : state === 'notJoined' ? t('player.notJoinedYet') : t('player.notPlayingShort');
                     return (
-                      <span key={r} className={plays ? 'avail yes' : 'avail no'}
-                        title={`${t('round.label', { roman: roman(r), n: r })}: ${plays ? t('player.plays') : t('player.notPlayingShort')}`}>
-                        {plays ? '●' : '○'}
+                      <span key={r} className={`avail ${state}`} title={`${t('round.label', { roman: roman(r), n: r })}: ${label}`}>
+                        {state === 'plays' ? '●' : state === 'notJoined' ? '·' : '○'}
                       </span>
                     );
                   })}

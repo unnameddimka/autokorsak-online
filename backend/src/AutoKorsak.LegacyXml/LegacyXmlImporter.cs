@@ -119,6 +119,7 @@ public static class LegacyXmlImporter
             ReadRound(el, t);
         t.Rounds.Sort((a, b) => a.Number.CompareTo(b.Number));
         t.EnsureStages(); // legacy XML has one system for the whole tournament: a single initial stage
+        t.PairingsEverDrawn = t.Rounds.Any(r => r.Pairings.Count > 0);
         return t;
     }
 

@@ -64,6 +64,12 @@ public sealed class Tournament
 
     public int NextPairingId { get; set; } = 1;
 
+    /// <summary>
+    /// Monotonic: set once any pairing has ever been created (spec 0001 §2.1). Deleting pairings later does not make
+    /// the tournament "never drawn" again.
+    /// </summary>
+    public bool PairingsEverDrawn { get; set; }
+
     /// <summary>The complete original legacy XML document of an imported tournament (null for new tournaments).</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LegacySourceXml { get; set; }
@@ -237,8 +243,14 @@ public sealed class Pairing
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? LegacyXml { get; set; }
 
-    /// <summary>A recorded result makes a pairing immutable to automatic pairing and stage changes (spec 0001 §1).</summary>
+    /// <summary>A two-player (or legacy) result has been recorded.</summary>
     public bool HasRecordedResult => Result != GameResult.Unset;
+
+    /// <summary>
+    /// The pairing already credits an outcome: a recorded result, or a bye with a real player (one win and one point,
+    /// spec 0001 §4). Such pairings are immutable to automatic pairing and stage changes (spec 0001 §1).
+    /// </summary>
+    public bool HasAwardedOutcome => HasRecordedResult || (IsBye && BlackId is not null);
 
     public IEnumerable<int> PlayerIds()
     {

@@ -205,6 +205,28 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Frozen_round_robin_member_availability_edit_is_refused_and_nothing_changes()
+    {
+        var client = _factory.Client();
+        var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin, 3), Json));
+        var id = created["tournament"]!["id"]!.GetValue<string>();
+        for (var i = 1; i <= 4; i++)
+            await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
+        await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { }, Json));
+
+        var response = await client.PutAsJsonAsync($"/api/tournaments/{id}/participants/2",
+            LegacyXmlTests.Player("Гравець 2") with { NotPlayingRounds = [2] }, Json);
+
+        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        Assert.Equal("participant.rosterMemberUnavailable", await ErrorCode(response));
+        var reloaded = (await Body(await client.GetAsync($"/api/tournaments/{id}")))["tournament"]!.Deserialize<Tournament>(Json)!;
+        Assert.Empty(reloaded.FindParticipant(2)!.NotPlayingRounds);
+        var all = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true }, Json));
+        Assert.Equal(4, all["result"]!["created"]!.GetValue<int>());
+    }
+
+    [Fact]
     public async Task Mutations_without_client_header_are_refused()
     {
         var client = _factory.CreateClient();
