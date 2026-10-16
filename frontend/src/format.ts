@@ -1,5 +1,5 @@
 import { ApiError } from './api/client';
-import type { GameResult, PairingStage, Participant, Tournament, TournamentSystem } from './api/types';
+import type { GameResult, Pairing, PairingStage, Participant, Tournament, TournamentSystem } from './api/types';
 import type { MessageKey } from './i18n/en';
 
 type T = (key: MessageKey, params?: Record<string, unknown>) => string;
@@ -52,6 +52,11 @@ export function errorMessage(error: unknown, tk: TK): string {
 export function stageFor(t: Tournament, round: number): PairingStage {
   const stages = t.stages.length > 0 ? t.stages : [{ startRound: 1, system: t.system, frozenRosterIds: null, randomStartingNumbers: false }];
   return [...stages].reverse().find((s) => s.startRound <= round) ?? stages[0];
+}
+
+/** Mirrors the server rule: a recorded result, or a bye credited to a real player (one win and one point). */
+export function hasAwardedOutcome(p: Pick<Pairing, 'result' | 'isBye' | 'blackId'>): boolean {
+  return p.result !== 'unset' || (p.isBye && p.blackId !== null);
 }
 
 export type RoundParticipation = 'notJoined' | 'notPlaying' | 'plays';

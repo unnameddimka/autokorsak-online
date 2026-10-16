@@ -492,6 +492,7 @@ export const en = {
   'player.notJoinedYet': 'not yet joined',
   'player.rosterRoundsLocked': 'Availability in round-robin rounds is fixed for this player. For a withdrawal, enter technical results by referee decision.',
   'error.participant.rosterMemberUnavailable': 'The player is part of a drawn round robin, so they cannot be marked as not playing in round {round}. For a withdrawal, enter technical results with “Result by referee decision”.',
+  'pairing.deleteByeMessage': 'This bye has already been credited as one win and one point. Deleting it removes that point from the standings.',
 } as const;
 
 export type MessageKey = keyof typeof en;

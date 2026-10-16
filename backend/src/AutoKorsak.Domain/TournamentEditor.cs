@@ -405,6 +405,7 @@ public static partial class TournamentEditor
         var (round, pairing) = FindPairing(t, pairingId);
         if (pairing.HasAwardedOutcome && !confirmDiscardResult)
             throw DomainException.Conflict("pairing.resultWouldBeDiscarded");
+        t.PairingsEverDrawn = true; // an existing pairing proves a draw happened, even in data saved before 0001
         round.Pairings.Remove(pairing);
     }
 

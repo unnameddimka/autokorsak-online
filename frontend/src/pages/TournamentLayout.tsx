@@ -31,7 +31,8 @@ interface TournamentContextValue {
   run: (action: () => Promise<TournamentView>) => Promise<TournamentView>;
 }
 
-const TournamentContext = createContext<TournamentContextValue | null>(null);
+/** Exported for component tests; pages use {@link useTournament}. */
+export const TournamentContext = createContext<TournamentContextValue | null>(null);
 
 export function useTournament(): TournamentContextValue {
   const ctx = useContext(TournamentContext);

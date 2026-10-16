@@ -94,10 +94,14 @@ public sealed class Tournament
     public IEnumerable<(Round Round, Pairing Pairing)> AllPairings() =>
         Rounds.SelectMany(r => r.Pairings.Select(p => (r, p)));
 
-    /// <summary>Data saved before spec 0001 has no stages: it is one stage from round 1 with the tournament system.</summary>
+    /// <summary>
+    /// Compatibility defaults for data saved before spec 0001: no stages means one stage from round 1 with the
+    /// tournament system, and existing pairings prove the tournament was already drawn (monotonic Settings lock).
+    /// </summary>
     public void EnsureStages()
     {
         if (Stages.Count == 0) Stages.Add(new PairingStage { StartRound = 1, System = System });
+        if (!PairingsEverDrawn && Rounds.Any(r => r.Pairings.Count > 0)) PairingsEverDrawn = true;
         // Sorting bumps the list version, so only sort when needed (callers may be enumerating the stages).
         for (var i = 1; i < Stages.Count; i++)
             if (Stages[i - 1].StartRound > Stages[i].StartRound)

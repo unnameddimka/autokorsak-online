@@ -45,7 +45,7 @@ and reviewed; this version contains the review corrections and awaits re-review.
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **106 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **107 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
@@ -66,9 +66,11 @@ and reviewed; this version contains the review corrections and awaits re-review.
   defaults; partial batch finalization. Review corrections: frozen-member availability refused (domain and API),
   the monotonic Settings lock after deleting all pairings and reloading, unplayed colour swaps restored only after
   confirmation, credited byes as outcomes (joining default, stage barrier, delete confirmation, generator
-  conflict), and fixture byes kept on regeneration.
-- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **12 passed, 0 failed**
-  (including participation markers before the joining round and locked roster rounds).
+  conflict), and fixture byes kept on regeneration. Re-review: the lock is kept for a stored pre-0001 tournament after
+  its last pairing is deleted (API test with an authentic pre-0001 JSON document).
+- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **14 passed, 0 failed**
+  (including participation markers before the joining round, locked roster rounds, and the pairing editor sending
+  the confirmation flag when a credited bye is deleted).
   Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
   Russian-only letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback. Component
   test (jsdom): the settings form prompts before in-app navigation discards unsaved changes, and does not prompt
@@ -84,7 +86,8 @@ and reviewed; this version contains the review corrections and awaits re-review.
   disabled, a late entrant defaulting to round IV and unavailable in round II, and the preparation view ordering by
   score group, then rating. No page errors. Review corrections were checked in the running app: a late entrant shows
   "not yet joined" markers, a roster member has locked availability in round-robin rounds, and the Settings system
-  stays locked after all pairings are deleted.
+  stays locked after all pairings are deleted. Re-review: deleting a credited bye in the pairing editor (uk and en)
+  shows the bye-specific warning and succeeds after confirmation.
 
 ## Known limitations
 
@@ -113,7 +116,7 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Re-review of the spec 0001 corrections (see the review log).
+1. Final re-review of the spec 0001 corrections (see the review log).
 2. Referee demo of the round-robin and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
 3. Spec 0001 for the next scope (likely candidates: bye and skipped-round scoring, automatic Swiss/McMahon
@@ -125,4 +128,5 @@ assistant wizard, authentication, other board games, SORP result points.
 |---|---|---|---|---|
 | 2026-10-16 | GPT-6 | `0cc16168` | 2× P1 (paired player → preliminary; game → bye kept its result), 4× P2 (false skipped-round notice, unsaved settings lost on navigation, Players list missing country/team/coach, invalid `NotPlayingInRound` silently dropped). Architecture accepted. | All six fixed with regression tests; see [review/0000-review-gpt6-0cc16168-response.md](review/0000-review-gpt6-0cc16168-response.md). Accepted on re-review ([review/0000-rereview-gpt6-bfe922c8.md](review/0000-rereview-gpt6-bfe922c8.md)). |
 | 2026-10-16 | GPT-6 (re-review) | `bfe922c8` | All six previous findings closed. 1× P2: an explicit absence (`NotPlayingRounds`) in a counted round raised no skipped-round notice before any result existed. | Fixed with 4 regression tests; see [review/0000-rereview-gpt6-bfe922c8-response.md](review/0000-rereview-gpt6-bfe922c8-response.md). Awaiting final re-review. |
-| 2026-10-16 | GPT-6 | `e7b57590` (spec 0001) | 1× P1 (frozen RR member could be made unavailable, blocking generation), 4× P2 (Settings lock lost after deleting pairings; unplayed colour swaps kept; credited bye not treated as an outcome; Players list showed pre-joining rounds as available). | All five fixed with regression tests; see [review/0001-review-gpt6-e7b57590-response.md](review/0001-review-gpt6-e7b57590-response.md). Awaiting re-review. |
+| 2026-10-16 | GPT-6 | `e7b57590` (spec 0001) | 1× P1 (frozen RR member could be made unavailable, blocking generation), 4× P2 (Settings lock lost after deleting pairings; unplayed colour swaps kept; credited bye not treated as an outcome; Players list showed pre-joining rounds as available). | All five fixed with regression tests; see [review/0001-review-gpt6-e7b57590-response.md](review/0001-review-gpt6-e7b57590-response.md). Closed on re-review. |
+| 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Awaiting final re-review. |

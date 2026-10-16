@@ -4,7 +4,7 @@ import type { GameResult, Pairing, PairingInput, Participant } from '../api/type
 import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/en';
-import { errorMessage, roman, stageFor } from '../format';
+import { errorMessage, hasAwardedOutcome, roman, stageFor } from '../format';
 import { useTournament } from './TournamentLayout';
 
 const FLIP: Partial<Record<GameResult, GameResult>> = { blackWins: 'whiteWins', whiteWins: 'blackWins' };
@@ -97,16 +97,18 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
 
   async function remove() {
     if (!pairing) return;
-    const hasResult = pairing.result !== 'unset';
+    // A credited bye is an awarded outcome too (spec 0001 §4); the server requires the confirmation flag for it.
+    const awarded = hasAwardedOutcome(pairing);
     const ok = await confirm({
       title: t('pairing.deleteTitle'),
-      message: hasResult ? t('pairing.deleteWithResultMessage') : t('pairing.deleteMessage'),
+      message: !awarded ? t('pairing.deleteMessage')
+        : pairing.isBye ? t('pairing.deleteByeMessage') : t('pairing.deleteWithResultMessage'),
       confirmLabel: t('common.delete'),
       danger: true,
     });
     if (!ok) return;
     try {
-      await run(() => api.deletePairing(tournament.id, pairing.id, hasResult));
+      await run(() => api.deletePairing(tournament.id, pairing.id, awarded));
       toast.success(t('pairing.deleted'));
       onClose();
     } catch (e) {

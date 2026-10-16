@@ -227,6 +227,34 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Pre_0001_tournament_keeps_the_settings_lock_after_its_last_pairing_is_deleted()
+    {
+        // Build an authentic pre-0001 document: no "stages", no "pairingsEverDrawn", no "firstEligibleRound".
+        var t = TournamentEditor.Create(LegacyXmlTests.Settings("Старий турнір", TournamentSystem.Swiss), DateTimeOffset.UnixEpoch);
+        TournamentEditor.AddParticipant(t, LegacyXmlTests.Player("Перший"));
+        TournamentEditor.AddParticipant(t, LegacyXmlTests.Player("Другий"));
+        var pairing = TournamentEditor.AddPairing(t, 1, LegacyXmlTests.Pair(1, 2)); // unplayed
+        var node = JsonNode.Parse(JsonSerializer.Serialize(t, Json))!.AsObject();
+        node.Remove("stages");
+        node.Remove("pairingsEverDrawn");
+        foreach (var p in node["participants"]!.AsArray()) p!.AsObject().Remove("firstEligibleRound");
+        var old = JsonSerializer.Deserialize<Tournament>(node.ToJsonString(), Json)!;
+        Assert.False(old.PairingsEverDrawn);
+        new Storage(_factory.DatabasePath).SaveTournament(old); // as stored by a pre-0001 version
+
+        var client = _factory.Client();
+        Assert.True((await Body(await client.GetAsync($"/api/tournaments/{t.Id}")))["systemLocked"]!.GetValue<bool>());
+        await Body(await client.DeleteAsync($"/api/tournaments/{t.Id}/pairings/{pairing.Id}"));
+        var after = await Body(await client.GetAsync($"/api/tournaments/{t.Id}"));
+        Assert.True(after["systemLocked"]!.GetValue<bool>());
+        Assert.True(after["tournament"]!["pairingsEverDrawn"]!.GetValue<bool>()); // persisted on that save
+
+        var change = await client.PutAsJsonAsync($"/api/tournaments/{t.Id}/settings",
+            LegacyXmlTests.Settings("Старий турнір", TournamentSystem.McMahon), Json);
+        Assert.Equal("settings.systemLocked", await ErrorCode(change));
+    }
+
+    [Fact]
     public async Task Mutations_without_client_header_are_refused()
     {
         var client = _factory.CreateClient();
