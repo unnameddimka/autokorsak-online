@@ -270,6 +270,12 @@ public class ApiTests : IDisposable
         }, Json));
         Assert.Equal(2, saved["roundRobin"]!["numbers"]!["1"]!.GetValue<int>());
 
+        // A direct request with a literal 0 is refused (empty/null is the only way to clear in the batch API).
+        var zero = await client.PutAsJsonAsync($"/api/tournaments/{id}/starting-numbers",
+            new { entries = new[] { new { participantId = 1, number = 0 } } }, Json);
+        Assert.Equal("startingNumbers.invalidValue", await ErrorCode(zero));
+        Assert.Equal(2, (await Body(await client.GetAsync($"/api/tournaments/{id}")))["roundRobin"]!["numbers"]!["1"]!.GetValue<int>());
+
         var prompt = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true, source = "entered" }, Json);
         Assert.Equal(HttpStatusCode.Conflict, prompt.StatusCode);
         Assert.Equal("generate.roundCountAdjustment", await ErrorCode(prompt));

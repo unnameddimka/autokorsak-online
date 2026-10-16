@@ -100,6 +100,23 @@ public class Spec0002Tests
             TournamentEditor.UpdateParticipant(t, prelim.Id, Player("Prelim", preliminary: true) with { StartingNumber = 5 })).Code);
     }
 
+    // Review of 4ecfd464, P2-01: a typed 0 is invalid in the batch API; null clears.
+    [Fact]
+    public void Batch_zero_is_rejected_without_changes_and_null_clears()
+    {
+        var t = RoundRobin(3);
+        Number(t, (1, 3));
+        var before = Json(t);
+
+        var ex = Assert.Throws<DomainException>(() => Number(t, (2, 1), (1, 0)));
+
+        Assert.Equal("startingNumbers.invalidValue", ex.Code);
+        Assert.Equal(0, ex.Args["value"]);
+        Assert.Equal(before, Json(t)); // neither row applied
+        Number(t, (1, null));
+        Assert.Null(t.FindParticipant(1)!.StartingNumber);
+    }
+
     // 3. Manual order defines the schedule
     [Fact]
     public void Manual_permutation_defines_the_frozen_order_regardless_of_registration_and_rating()

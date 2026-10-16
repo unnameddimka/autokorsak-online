@@ -54,6 +54,18 @@ export function stageFor(t: Tournament, round: number): PairingStage {
   return [...stages].reverse().find((s) => s.startRound <= round) ?? stages[0];
 }
 
+/**
+ * Parses a typed starting number: empty → null (clear), a whole number 1–999 → the number, anything else (including a
+ * literal 0) → 'invalid'. The server enforces the same range.
+ */
+export function parseStartingNumber(text: string): number | null | 'invalid' {
+  const trimmed = text.trim();
+  if (trimmed === '') return null;
+  if (!/^\d+$/.test(trimmed)) return 'invalid';
+  const value = Number(trimmed);
+  return value >= 1 && value <= 999 ? value : 'invalid';
+}
+
 /** Mirrors the server rule: a recorded result, or a bye credited to a real player (one win and one point). */
 export function hasAwardedOutcome(p: Pick<Pairing, 'result' | 'isBye' | 'blackId'>): boolean {
   return p.result !== 'unset' || (p.isBye && p.blackId !== null);

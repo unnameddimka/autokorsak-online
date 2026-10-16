@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client';
 import type { CatalogEntry, Participant, ParticipantInput } from '../api/types';
 import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, isLockedRosterRound, RANK_OPTIONS, roman } from '../format';
+import { errorMessage, formatRank, isLockedRosterRound, parseStartingNumber, RANK_OPTIONS, roman } from '../format';
 import { useTournament } from './TournamentLayout';
 
 const EMPTY: ParticipantInput = {
@@ -47,13 +47,16 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   });
 
   async function save() {
+    // Only a changed number is validated and sent; an unchanged (e.g. frozen, read-only) number never blocks other edits.
     const trimmed = numberText.trim();
-    if (trimmed !== '' && !/^d+$/.test(trimmed)) {
+    const numberChanged = trimmed !== (initialNumber?.toString() ?? '');
+    const parsed = parseStartingNumber(trimmed);
+    if (numberChanged && parsed === 'invalid') {
       setError(new ApiError('startingNumbers.invalidValue', { value: trimmed, max: 999 }, 400));
       return;
     }
-    // null = unchanged, 0 = clear, n = set (the server applies the same rules as the Pairings table).
-    const startingNumber = trimmed === (initialNumber?.toString() ?? '') ? null : trimmed === '' ? 0 : Number(trimmed);
+    // Card payload: null = unchanged, 0 = clear (internal sentinel for an emptied field), n = set.
+    const startingNumber = !numberChanged ? null : parsed === null ? 0 : (parsed as number);
     const input = { ...form, startingNumber };
     setSaving(true);
     setError(null);

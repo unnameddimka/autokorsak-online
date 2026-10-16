@@ -308,7 +308,7 @@ public static partial class TournamentEditor
         foreach (var e in entries)
         {
             var p = t.FindParticipant(e.ParticipantId) ?? throw new NotFoundException("participant.notFound");
-            var number = e.Number is 0 ? null : e.Number;
+            var number = e.Number; // null clears; 0 is not a valid number here (only the player card uses 0 as "clear")
             if (number == p.StartingNumber) continue;
             CheckDraftEditable(t, p.DisplayName, p.Preliminary, p.FirstEligibleRound, number);
             resolved.Add((p, number));

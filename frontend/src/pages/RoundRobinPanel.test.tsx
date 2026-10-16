@@ -86,6 +86,31 @@ describe('round-robin generation dialogs', () => {
     expect(generate.mock.calls[0][2]).toMatchObject({ source: 'entered', roundCount: null });
   });
 
+  it('rejects a typed 0 in the table without saving anything', async () => {
+    const u = setup();
+    const save = vi.spyOn(api, 'saveStartingNumbers').mockResolvedValue(u.view);
+    fireEvent.change(u.getByLabelText('Starting number: Alpha'), { target: { value: '0' } });
+    fireEvent.click(u.getByRole('button', { name: 'Save starting numbers' }));
+    await waitFor(() => expect(u.getByText(/“0” is not a valid starting number/)).toBeTruthy());
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it('blocks Clear while table edits are unsaved, until they are saved or discarded', async () => {
+    const u = setup();
+    const clear = vi.spyOn(api, 'clearRoundRobin');
+    const clearButton = () => u.getByRole('button', { name: 'Clear round-robin draw' }) as HTMLButtonElement;
+    expect(clearButton().disabled).toBe(false);
+
+    fireEvent.change(u.getByLabelText('Starting number: Bravo'), { target: { value: '3' } });
+    expect(clearButton().disabled).toBe(true);
+    fireEvent.click(clearButton());
+    expect(clear).not.toHaveBeenCalled();
+    expect(u.getByText(/before drawing or clearing the draw/)).toBeTruthy();
+
+    fireEvent.click(u.getByRole('button', { name: 'Discard changes' }));
+    expect(clearButton().disabled).toBe(false);
+  });
+
   it('saves several table edits in one batch request', async () => {
     const u = setup();
     const save = vi.spyOn(api, 'saveStartingNumbers').mockResolvedValue(u.view);

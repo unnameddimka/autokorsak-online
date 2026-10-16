@@ -2,8 +2,8 @@
 
 **Current version:** spec 0001 (pairing stages, round robin, bye scoring, score-group view) on top of spec 0000,
 2026-10-16. Spec 0000 was accepted after review (final version `8fd3898`); spec 0001 was accepted after review
-(final version `b565ad20`). Spec 0002 (manual starting numbers, round-count adjustment, clear draw) is implemented
-and awaits independent review. The live container still runs the 0001 version until the owner asks to redeploy.
+(final version `b565ad20`). Spec 0002 (manual starting numbers, round-count adjustment, clear draw) was implemented
+in `4ecfd464` and reviewed; this version contains the review corrections and awaits re-review. The live container still runs the 0001 version until the owner asks to redeploy.
 
 ## What works
 
@@ -55,7 +55,7 @@ and awaits independent review. The live container still runs the 0001 version un
 
 ## Test results (2026-10-16)
 
-- Backend (`docker compose --profile test run --rm backend-tests`): **124 passed, 0 failed**. Coverage: reference
+- Backend (`docker compose --profile test run --rm backend-tests`): **125 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
   spec §9.1 (Кобзар Гліб 6/21/21/111, Єрємєєв Матвій 5/17/11/113) and the legacy table order; unedited export
   deep-equal to the source for all four fixtures; edit round-trip; preservation of unsupported fields; Unicode;
@@ -89,11 +89,16 @@ and awaits independent review. The live container still runs the 0001 version un
   - drafts kept after Clear; the result lock lifecycle (referee and unknown results, unlock after removal, byes never
     lock); the single-stage Settings unlock versus individual deletion and multi-stage Clear;
   - starting numbers in the export report;
-  - the API lifecycle: numbers → prompt → resize → lock → clear → unlock.
-- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **17 passed, 0 failed**
+  - the API lifecycle: numbers → prompt → resize → lock → clear → unlock;
+  - review corrections: a typed 0 refused by the batch API (domain and direct API request), null still clears.
+- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **24 passed, 0 failed**
   (including participation markers before the joining round, locked roster rounds, and the pairing editor sending
   the confirmation flag when a credited bye is deleted). Spec 0002: the number-source dialog before the round-count
-  dialog, a single final request, cancel sending nothing, and one batch request for several table edits.
+  dialog, a single final request, cancel sending nothing, and one batch request for several table edits. Review
+  corrections:
+  - player card: a new number, a changed number, an unrelated edit while the number is frozen, a typed 0 rejected,
+    and an emptied field clearing;
+  - table: a typed 0 rejected without a request; Clear blocked while edits are unsaved.
   Localization: exactly `uk`/`en`, key parity, placeholder parity, no empty strings, no Russian locale file, no
   Russian-only letters in Ukrainian strings, no hard-coded Cyrillic in components, English fallback. Component
   test (jsdom): the settings form prompts before in-app navigation discards unsaved changes, and does not prompt
@@ -148,7 +153,7 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Independent review of the spec 0002 implementation.
+1. Re-review of the spec 0002 corrections (see the review log).
 2. Redeploy the live container when the owner asks.
 3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
@@ -161,4 +166,5 @@ assistant wizard, authentication, other board games, SORP result points.
 | 2026-10-16 | GPT-6 | `0cc16168` | 2× P1 (paired player → preliminary; game → bye kept its result), 4× P2 (false skipped-round notice, unsaved settings lost on navigation, Players list missing country/team/coach, invalid `NotPlayingInRound` silently dropped). Architecture accepted. | All six fixed with regression tests; see [review/0000-review-gpt6-0cc16168-response.md](review/0000-review-gpt6-0cc16168-response.md). Accepted on re-review ([review/0000-rereview-gpt6-bfe922c8.md](review/0000-rereview-gpt6-bfe922c8.md)). |
 | 2026-10-16 | GPT-6 (re-review) | `bfe922c8` | All six previous findings closed. 1× P2: an explicit absence (`NotPlayingRounds`) in a counted round raised no skipped-round notice before any result existed. | Fixed with 4 regression tests; see [review/0000-rereview-gpt6-bfe922c8-response.md](review/0000-rereview-gpt6-bfe922c8-response.md). Awaiting final re-review. |
 | 2026-10-16 | GPT-6 | `e7b57590` (spec 0001) | 1× P1 (frozen RR member could be made unavailable, blocking generation), 4× P2 (Settings lock lost after deleting pairings; unplayed colour swaps kept; credited bye not treated as an outcome; Players list showed pre-joining rounds as available). | All five fixed with regression tests; see [review/0001-review-gpt6-e7b57590-response.md](review/0001-review-gpt6-e7b57590-response.md). Closed on re-review. |
-| 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Awaiting final re-review. |
+| 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Accepted (final review `bf8d235`). |
+| 2026-10-16 | GPT-6 | `4ecfd464` (spec 0002) | 1× P1 (the player card rejected every non-empty starting number, including unchanged frozen ones, because of a broken digit check), 2× P2 (a typed 0 silently cleared a draft; Clear could discard unsaved table edits). | All three fixed with regression tests; see [review/0002-review-gpt6-4ecfd464-response.md](review/0002-review-gpt6-4ecfd464-response.md). Awaiting re-review. |

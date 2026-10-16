@@ -505,7 +505,7 @@ export const en = {
   'startingNumbers.saved': 'Starting numbers saved',
   'startingNumbers.frozenHint': 'fixed by the draw',
   'startingNumbers.inactiveHint': 'Numbers can be saved incomplete or temporarily repeated; they are checked when the draw is made. Players not included keep their saved number, but it is not used.',
-  'startingNumbers.generateNeedsSave': 'Save or discard the changed starting numbers before the draw.',
+  'startingNumbers.generateNeedsSave': 'Save or discard the changed starting numbers before drawing or clearing the draw.',
   'startingNumbers.err.missing': '{name}: no starting number',
   'startingNumbers.err.duplicate': 'Number {number} is used by: {names}',
   'startingNumbers.err.outOfRange': '{name}: number {value} is outside 1–{max}',

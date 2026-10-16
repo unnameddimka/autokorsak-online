@@ -507,7 +507,7 @@ export const uk: Record<MessageKey, string> = {
   'startingNumbers.saved': 'Стартові номери збережено',
   'startingNumbers.frozenHint': 'зафіксовано жеребкуванням',
   'startingNumbers.inactiveHint': 'Номери можна зберігати неповними чи тимчасово повтореними; їх перевіряють під час жеребкування. Гравці, що не входять до етапу, зберігають свій номер, але він не використовується.',
-  'startingNumbers.generateNeedsSave': 'Перед жеребкуванням збережіть або скасуйте змінені стартові номери.',
+  'startingNumbers.generateNeedsSave': 'Перед жеребкуванням чи очищенням жеребкування збережіть або скасуйте змінені стартові номери.',
   'startingNumbers.err.missing': '{name}: немає стартового номера',
   'startingNumbers.err.duplicate': 'Номер {number} мають кілька гравців: {names}',
   'startingNumbers.err.outOfRange': '{name}: номер {value} поза межами 1–{max}',

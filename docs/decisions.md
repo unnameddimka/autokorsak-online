@@ -78,13 +78,14 @@ The 0001 tests that relied on the old behaviour were rewritten (registration ord
 
 | # | Decision | Rationale |
 |---|---|---|
-| S1 | Player card API: `startingNumber` null = unchanged, 0 = clear, positive = set. The Pairings table uses `PUT …/starting-numbers`, where null = clear. Both share one server rule set (`CheckDraftEditable`). | Old clients and unrelated card edits never touch drafts; identical rules for both editors (§6). |
+| S1 | Player card API: `startingNumber` null = unchanged, 0 = clear (internal sentinel sent only for an emptied field), positive = set. The card validates and sends the number only when it changed, so a read-only frozen number never blocks other edits. The Pairings table uses `PUT …/starting-numbers`, where null = clear and **0 is invalid** (revised after review of `4ecfd464`). In both UIs a typed literal 0 is rejected, not treated as clearing. Both share one server rule set (`CheckDraftEditable`). | Old clients and unrelated card edits never touch drafts; identical rules for both editors (§6). |
 | S2 | Drafts are whole numbers 1–999. Edits are refused (409) when the stage is frozen, the player is not eligible (preliminary, or joining after the stage start), or the tournament has no round-robin stage. A batch with any bad row applies nothing. Gaps and duplicates are only checked at generation. | Spec §2.1–2.2; agreed during spec review. |
 | S3 | The confirmation order is the number source first (a client-side choice dialog when "random" is ticked and drafts exist), then the server's `generate.roundCountAdjustment` 409, then one final request with `source` and `roundCount`. The server rechecks everything on that request. | Spec §4.2 fixed order; a 409 confirmation request writes nothing. |
 | S4 | The server validates entered numbers **before** asking about the round count, so invalid numbers are reported without a pointless resize prompt. | Matches "numbers first". |
 | S5 | Clear has a preflight (`confirm=false` → 409 `clear.confirm` with counts) so the dialog shows exact numbers; the confirmed request rechecks the lock. | Spec §5.1 confirmation contents; §6 revalidation. |
 | S6 | The header save indicator ignores 409 confirmation requests (`clear.confirm`, `generate.roundCountAdjustment`, `generate.replaceUnplayed`, `pairing.resultWouldBeDiscarded`, `stage.unplayedPairingsWillBeDeleted`). | Nothing was attempted, so "last change not saved" would mislead. |
 | S7 | After a clear that unlocks Settings and a switch to another system, stored drafts remain but are hidden, because the field only appears in tournaments with a round-robin stage. | Agreed during spec review; no data loss. |
+| S9 | Unsaved Pairings-table edits block both Generate and Clear. | Review of `4ecfd464` (P2-02): a server update must never silently discard local edits. |
 | S8 | The browser smoke test runs on a separate disposable container (`127.0.0.1:8091`); the live instance is not redeployed without the owner's instruction. | Spec §7.4 "do not deploy without the owner's separate instruction". |
 
 ## Open questions (for the referee / owner)

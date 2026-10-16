@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client';
 import type { ClearResult, GenerationResult, Participant, StartingNumberSource } from '../api/types';
 import { Checkbox, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { roman } from '../format';
+import { parseStartingNumber, roman } from '../format';
 import { useTournament } from './TournamentLayout';
 
 /** Structured server error for invalid entered starting numbers (spec 0002 §2.2). */
@@ -64,12 +64,13 @@ export function RoundRobinPanel() {
   async function saveNumbers() {
     const entries: { participantId: number; number: number | null }[] = [];
     for (const [id, text] of Object.entries(drafts)) {
-      const trimmed = text.trim();
-      if (trimmed !== '' && !/^\d+$/.test(trimmed)) {
-        toast.error(new ApiError('startingNumbers.invalidValue', { value: trimmed, max: 999 }, 400));
+      // Empty clears (null); a literal 0 or any other non-1–999 value is invalid and nothing is saved.
+      const parsed = parseStartingNumber(text);
+      if (parsed === 'invalid') {
+        toast.error(new ApiError('startingNumbers.invalidValue', { value: text.trim(), max: 999 }, 400));
         return;
       }
-      entries.push({ participantId: Number(id), number: trimmed === '' ? null : Number(trimmed) });
+      entries.push({ participantId: Number(id), number: parsed });
     }
     try {
       await run(() => api.saveStartingNumbers(tournament.id, entries));
@@ -159,9 +160,10 @@ export function RoundRobinPanel() {
         <Checkbox label={t('generate.allRounds')} checked={allRounds} onChange={setAllRounds} disabled={locked} />
         {!rr.frozen && <Checkbox label={t('generate.randomNumbers')} hint={t('generate.randomNumbersHint')} checked={random} onChange={setRandom} disabled={locked} />}
         {rr.frozen && <span className="muted">{rr.randomStartingNumbers ? t('generate.numbersFrozenRandom') : t('generate.numbersFrozenOrdered')}</span>}
-        <button type="button" className="danger-outline" onClick={clearDraw} disabled={locked}>{t('clear.button')}</button>
+        <button type="button" className="danger-outline" onClick={clearDraw} disabled={locked || dirty}>{t('clear.button')}</button>
       </div>
       {locked && <Notice kind="warning">{t('generate.lockedHint', { games: lockedGames })}</Notice>}
+      {/* Unsaved table edits block both Generate and Clear, so a server update can never silently discard them. */}
       {!locked && dirty && <p className="muted">{t('startingNumbers.generateNeedsSave')}</p>}
       {!locked && !allRounds && <p className="muted">{t('generate.singleRoundWarning')}</p>}
 
