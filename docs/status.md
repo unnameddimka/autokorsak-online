@@ -2,7 +2,7 @@
 
 **Current version:** spec 0003 (referee usability: automatic round-robin round count, pure round-robin participation,
 Standings-only round control, transliteration, rating input, app-only explanation, result-first pairing editor with
-the "both win" result), implemented 2026-10-24 on top of specs 0000–0002, **awaiting GPT-6 review**. Spec 0000 was
+the "both win" result), implemented 2026-10-24 in `f20db3f` on top of specs 0000–0002, **awaiting GPT-6 review**. Spec 0000 was
 accepted after review (final version `8fd3898`), and so were spec 0001 (final version `b565ad20`) and spec 0002
 (final version `6821a5b6`, accepted in `ea951a2`). The live container on `:8080` was not redeployed; it still runs
 an earlier version until the owner asks to redeploy.
@@ -209,7 +209,7 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. GPT-6 review of the spec 0003 implementation.
+1. GPT-6 review of the spec 0003 implementation (`f20db3f`).
 2. Redeploy the live container when the owner asks (it does not include 0002 or 0003 yet).
 3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
