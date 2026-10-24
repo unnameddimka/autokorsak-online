@@ -25,6 +25,12 @@
 - Living docs: `README.md`, `docs/architecture.md`, `docs/decisions.md`, `docs/status.md`,
   `docs/development-workflow.md`. Update them in the same change as the code they describe. Record verified
   facts only.
+- **Future design documents are NOT implementation authorization.** Files in `docs/future/` (including
+  `docs/future/platform-architecture.md`) are planning material only, regardless of how definite their language
+  sounds. Do not implement, scaffold, migrate, deploy, change current architecture, add tests for hypothetical
+  features, or create an implementation backlog merely because such a file exists or changes. Only a separately
+  scoped, explicitly owner-approved numbered development spec plus an instruction to implement authorizes work.
+  Future documents do not supersede approved specs or current code.
 - All specs, docs, code identifiers, and comments are in English.
 - `docs/reference/legacy-ui/` (screenshots) and `legacy-autokorsak/` (fixtures) are evidence. Do not modify them.
   The primary fixture path `legacy-autokorsak/А_11.12.21.xml` (Cyrillic А) is a contract.
