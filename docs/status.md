@@ -2,7 +2,7 @@
 
 **Current version:** spec 0003 (referee usability: automatic round-robin round count, pure round-robin participation,
 Standings-only round control, transliteration, rating input, app-only explanation, result-first pairing editor with
-the "both win" result), implemented 2026-10-24 in `f20db3f` on top of specs 0000–0002, **awaiting GPT-6 review**. Spec 0000 was
+the "both win" result), implemented 2026-10-24 in `f20db3f` on top of specs 0000–0002; review finding P2-01 fixed in `99c908a`, **awaiting GPT-6 re-review**. Spec 0000 was
 accepted after review (final version `8fd3898`), and so were spec 0001 (final version `b565ad20`) and spec 0002
 (final version `6821a5b6`, accepted in `ea951a2`). The live container on `:8080` was not redeployed; it still runs
 an earlier version until the owner asks to redeploy.
@@ -74,6 +74,11 @@ an earlier version until the owner asks to redeploy.
   and a per-player decision for possible namesakes.
 
 ## Test results (2026-10-24, spec 0003)
+
+- After the review correction `99c908a`: backend **143 passed, 0 failed** (3 added for P2-01), frontend **48 passed,
+  0 failed**, production build clean; disposable-instance smoke: the P2-01 scenario (round V chosen before drawing
+  three players) passed 8 checks in uk and en, and the full spec 0003 smoke again passed 52 checks, no page or console
+  errors. The figures below are for `f20db3f`.
 
 - Backend (`docker compose --profile test run --rm backend-tests`): **140 passed, 0 failed** (125 before; 15 added,
   10 rewritten). `Spec0003Tests`: six players → 5 rounds with Settings unable to set or overwrite the count; three
@@ -209,7 +214,7 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. GPT-6 review of the spec 0003 implementation (`f20db3f`).
+1. GPT-6 re-review of the spec 0003 correction (`99c908a`).
 2. Redeploy the live container when the owner asks (it does not include 0002 or 0003 yet).
 3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
@@ -225,3 +230,4 @@ assistant wizard, authentication, other board games, SORP result points.
 | 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Accepted (final review `bf8d235`). |
 | 2026-10-16 | GPT-6 | `4ecfd464` (spec 0002) | 1× P1 (the player card rejected every non-empty starting number, including unchanged frozen ones, because of a broken digit check), 2× P2 (a typed 0 silently cleared a draft; Clear could discard unsaved table edits). | All three fixed with regression tests; see [review/0002-review-gpt6-4ecfd464-response.md](review/0002-review-gpt6-4ecfd464-response.md). |
 | 2026-10-16 | GPT-6 (re-review) | `6821a5b6` (spec 0002) | All three findings closed; no new blocking issue. | Accepted; see [review/0002-rereview-gpt6-6821a5b6.md](review/0002-rereview-gpt6-6821a5b6.md). |
+| 2026-10-24 | GPT-6 | `f20db3f` (spec 0003) | 1× P2: drawing all rounds of a pure round robin failed with `round.outOfRange` when the current round was valid only under the provisional count. Architecture accepted. | Fixed in `99c908a` with domain and API regression tests; see [review/0003-review-gpt6-f20db3f-response.md](review/0003-review-gpt6-f20db3f-response.md). Awaiting re-review. |
