@@ -143,7 +143,10 @@ public static class PairingSchedule
         var length = end - start + 1;
         if (length > cycle)
             throw new DomainException("generate.stageTooLong", Args(("players", players), ("required", cycle), ("actual", length)));
-        if (round > end) throw new DomainException("round.outOfRange", Args(("max", end)));
+        // The requested round only selects the stage when all rounds are drawn: a current round beyond a shrunk count
+        // (valid under the provisional count) must not block the draw; ApplyRoundCount clamps it (review P2-01 of 0003).
+        // A single requested round must exist after the resize.
+        if (round > end && !allRounds) throw new DomainException("round.outOfRange", Args(("max", end)));
 
         var targets = allRounds ? Enumerable.Range(start, length).ToList() : new List<int> { round };
 

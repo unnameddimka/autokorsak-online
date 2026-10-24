@@ -73,6 +73,34 @@ public class Spec0003Tests
         });
     }
 
+    // Review P2-01 of f20db3f: a current round valid only under the provisional count must not block the draw.
+    [Fact]
+    public void Drawing_all_rounds_from_a_round_beyond_the_derived_count_resizes_and_clamps_the_current_round()
+    {
+        var t = RoundRobin(3);
+        TournamentEditor.SetCurrentRound(t, 5, true); // provisional count 5
+        var result = Draw(t, round: 5);
+        Assert.Equal([1, 2, 3], result.Rounds);
+        Assert.Equal(3, t.NumberOfRounds);
+        Assert.Equal(3, t.CurrentRound);
+        Assert.Equal(3, t.Rounds.Count(r => r.Pairings.Count == 2));
+    }
+
+    [Fact]
+    public void A_single_round_beyond_the_derived_count_is_refused_without_writes()
+    {
+        var t = RoundRobin(3);
+        TournamentEditor.SetCurrentRound(t, 5, true);
+        var before = Json(t);
+        var ex = Assert.Throws<DomainException>(() => Draw(t, round: 5, all: false));
+        Assert.Equal("round.outOfRange", ex.Code);
+        Assert.Equal(3, ex.Args["max"]);
+        Assert.Equal(before, Json(t));
+
+        Draw(t, round: 4, all: true); // frozen roster afterwards: unchanged behaviour for later requests
+        Assert.Equal("round.outOfRange", Assert.Throws<DomainException>(() => Draw(t, round: 4, all: true)).Code);
+    }
+
     // 3. Only the final roster counts; fewer than two final players fails without writes.
     [Fact]
     public void Preliminary_players_do_not_inflate_the_schedule_and_one_final_player_fails_atomically()

@@ -325,6 +325,30 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
+    public async Task Drawing_all_rounds_from_a_current_round_beyond_the_derived_count_succeeds()
+    {
+        var client = _factory.Client();
+        var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin), Json));
+        var id = created["tournament"]!["id"]!.GetValue<string>();
+        for (var i = 1; i <= 3; i++)
+            await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/round", new { currentRound = 5, includeCurrentRound = true }, Json));
+
+        var single = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/5/generate", new { allRounds = false, source = "random" }, Json);
+        Assert.Equal("round.outOfRange", await ErrorCode(single));
+        var unchanged = (await Body(await client.GetAsync($"/api/tournaments/{id}")))["tournament"]!;
+        Assert.Equal(5, unchanged["numberOfRounds"]!.GetValue<int>());
+        Assert.Equal(5, unchanged["currentRound"]!.GetValue<int>());
+
+        var drawn = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/5/generate",
+            new { allRounds = true, source = "random" }, Json));
+        Assert.Equal(3, drawn["tournament"]!["numberOfRounds"]!.GetValue<int>());
+        Assert.Equal(3, drawn["tournament"]!["currentRound"]!.GetValue<int>());
+        Assert.Equal(3, drawn["result"]!["created"]!.GetValue<int>() - 3); // 3 games + 3 byes
+    }
+
+    [Fact]
     public async Task Pure_round_robin_count_is_server_derived_and_both_win_persists()
     {
         var client = _factory.Client();
