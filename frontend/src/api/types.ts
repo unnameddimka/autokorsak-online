@@ -2,7 +2,7 @@
 
 export type TournamentSystem = 'roundRobin' | 'scheveningen' | 'swiss' | 'mcMahon';
 export type StoneColor = 'black' | 'white';
-export type GameResult = 'unset' | 'blackWins' | 'whiteWins' | 'bothLose' | 'draw' | 'unknown';
+export type GameResult = 'unset' | 'blackWins' | 'whiteWins' | 'bothWin' | 'bothLose' | 'draw' | 'unknown';
 export type SkippedRoundScoring = 'addHalf' | 'alternate' | 'addNothing';
 
 export interface CriterionSetting { key: string; enabled: boolean }

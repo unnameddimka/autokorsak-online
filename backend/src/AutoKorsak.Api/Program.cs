@@ -57,7 +57,7 @@ tournaments.MapGet("/{id:guid}/standings/preparation", (TournamentService s, Gui
 tournaments.MapPost("/{id:guid}/stages", (TournamentService s, Guid id, StageChangeInput input) =>
     s.Mutate(id, t => PairingSchedule.ChangeSystem(t, input.StartRound, input.System, input.ConfirmDeleteUnplayed)));
 tournaments.MapPost("/{id:guid}/rounds/{round:int}/generate", (TournamentService s, IRandomSource random, Guid id, int round, GenerateInput input) =>
-    s.Mutate(id, t => PairingSchedule.GenerateRoundRobin(t, round, input.AllRounds, input.Source, input.RoundCount, input.ConfirmReplace, random)));
+    s.Mutate(id, t => PairingSchedule.GenerateRoundRobin(t, round, input.AllRounds, input.Source, input.ConfirmReplace, random)));
 tournaments.MapPost("/{id:guid}/rounds/{round:int}/clear-round-robin", (TournamentService s, Guid id, int round, ClearInput input) =>
     s.Mutate(id, t => PairingSchedule.ClearRoundRobin(t, round, input.Confirm)));
 tournaments.MapPut("/{id:guid}/starting-numbers", (TournamentService s, Guid id, StartingNumbersInput input) =>
@@ -127,8 +127,11 @@ namespace AutoKorsak.Api
 
     public sealed record StageChangeInput(int StartRound, TournamentSystem? System, bool ConfirmDeleteUnplayed);
 
-    /// <summary>Spec 0002: explicit starting-number source and an optional confirmed target round count.</summary>
-    public sealed record GenerateInput(bool AllRounds, StartingNumberSource Source, bool ConfirmReplace, int? RoundCount);
+    /// <summary>
+    /// Spec 0002: explicit starting-number source. A "roundCount" sent by a 0002 client is ignored: the server derives
+    /// the count (spec 0003 §2.2).
+    /// </summary>
+    public sealed record GenerateInput(bool AllRounds, StartingNumberSource Source, bool ConfirmReplace);
 
     public sealed record ClearInput(bool Confirm);
 

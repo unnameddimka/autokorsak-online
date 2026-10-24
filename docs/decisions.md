@@ -26,7 +26,7 @@ behavior require a new numbered spec.
 | I5 | A new tournament with an unverified system (round robin, Scheveningen, McMahon) **cannot be exported** to XML (clear message). An imported tournament keeps its original `Kind`. | Owner: document the limitation rather than generate incorrect XML. |
 | I6 | Legacy criterion token `Score` maps to *wins* in non-McMahon systems and to *total points* in McMahon. `SOS`/`SODOS`/`SOSOS` map directly. Other criteria have no verified token: they are kept in the app, omitted from the export, and reported. Unknown imported tokens are kept as `legacy:<token>` and written back. | Tokens observed in fixtures; screenshot 02 describes "Очки" as McMahon points. |
 | I7 | Standings-column tokens (`Place`, `Name`, `Country`, `Club`, `Team`, `Coach`, `Grade`, `Rank`, `Rating`, `Group`, `Tours`, `Criterias`, `NewRating`) are treated as verified. | All observed in the fixtures. |
-| I8 | Result tokens: `1-0`, `0-1`, `0-0` (both lose), `?-?` (unset). A **draw has no verified token**: it is exported as `?-?` (never as a wrong winner) and reported. | Observed tokens only. |
+| I8 | Result tokens: `1-0`, `0-1`, `0-0` (both lose), `?-?` (unset). A **draw has no verified token**: it is exported as `?-?` (never as a wrong winner) and reported. Since spec 0003 also `1-1` (both win, T1). | Observed tokens only. |
 | I9 | Bye: `PairingWithBye=true`, the player in `Black`, no `White` element; `Black=-1` means no player. Since spec 0001 a bye scores one win and one point. | Observed in `9х9…` and `Б…` fixtures; scoring per spec 0001 §4. |
 | I10 | `FirstMoveColor` `0` = Black (all fixtures; screenshot default). "White first" is stored in the app; on export the original value is kept, otherwise it is reported. | No sample with white first. |
 | I11 | `ForcedPairing` = manual pairing protection. `AllowJigo` (pairing level) = draw allowance. `BoardNumberFixed`, `ResultByReferee`, `Handicap`, and `AdditionalKomi` map by name. | Element names match the legacy pairing editor (screenshot 13). |
@@ -87,6 +87,31 @@ The 0001 tests that relied on the old behaviour were rewritten (registration ord
 | S7 | After a clear that unlocks Settings and a switch to another system, stored drafts remain but are hidden, because the field only appears in tournaments with a round-robin stage. | Agreed during spec review; no data loss. |
 | S9 | Unsaved Pairings-table edits block both Generate and Clear. | Review of `4ecfd464` (P2-02): a server update must never silently discard local edits. |
 | S8 | The browser smoke test runs on a separate disposable container (`127.0.0.1:8091`); the live instance is not redeployed without the owner's instruction. | Spec §7.4 "do not deploy without the owner's separate instruction". |
+
+## Spec 0003 decisions (2026-10-24)
+
+Spec 0003 (approved by the owner on 2026-10-24) **overrides** these earlier behaviours for a **pure round robin** (one
+stage, from round 1, round-robin system):
+- the 0002 round-count confirmation (S3, `generate.roundCountAdjustment`) is removed; the draw sets the count;
+- the 0001 joining-round and availability rules for round-robin entrants (R2, R7 adjustments, R13) no longer apply
+  there; they still apply when a round robin is followed by another stage.
+
+The 0001/0002 tests that relied on the old behaviour were rewritten; their test helpers now store a provisional round
+count directly in the aggregate, as data saved before 0003 does.
+
+| # | Decision | Rationale |
+|---|---|---|
+| T1 | The legacy XML token for **both win** is `1-1`. Evidence: the legacy serializer, decompiled (read-only, with ILSpy) from `legacy-autokorsak/AutoKorsak.exe` (embedded `TourtossBE.dll`): `Tourtoss.BE.Pair.Result` writes `GameResult` 1 → `1-0`, 2 → `0-1`, 3 → `1-1`, 4 → `0-0`, 5 → `½-½`, otherwise `?-?`, and reads `S-S` as 5. Import and export map `1-1` ↔ `GameResult.BothWin`; a new 1-1 exports without a limitation. The decompiled sources are not committed. | Spec 0003 §7.3: verify the token with the legacy software before claiming compatibility. |
+| T2 | The draw token `½-½` is evidenced by the same code, but **draw export and import are unchanged** in 0003: a draw is still exported as `?-?` and reported, and an imported `½-½`/`S-S` stays an opaque unknown result. Mapping it is a candidate for a later spec. | Spec 0003 §7.3 keeps the draw limitation; owner kept draw scoring out of scope (T4). |
+| T3 | In a pure round robin, stored `FirstEligibleRound`/`NotPlayingRounds` are **ignored but kept**: they affect neither draw eligibility, nor the automatic resize, nor pairing, nor standings cells and notices. New entrants get round 1 and no absences; input for these fields is ignored on create and update (no 409). Rounds with pairings and stage starts still block a shrink. | Owner answer 2026-10-24 (option "ignore in pure RR"); spec §2.3 "no failure repairable only by a hidden checkbox" and "do not mass-delete". |
+| T4 | Only **1-1** gets new scoring (one point and one win each, no notice). **0-0 and ½-½ keep the "special results" notice** and their existing simplified scoring, although §7.2 lists their points. | Owner answer 2026-10-24 (option "keep notices"). |
+| T5 | Settings silently **ignores** the submitted number of rounds for a pure round robin (UI, stale clients, forged requests); the stored value is kept. Before the draw, Settings and the tournament list show "at the draw" instead of the provisional value (the list column stores 0). Switching away from round robin before the draw makes the field editable again with the stored value. | §2.2: no manual RR count, no expected-player setting, server authoritative; no error for a harmless stale value. |
+| T6 | After a pure round-robin draw a **finalized** newcomer is still refused (`participant.noStageAfterRoundRobin`); registering as preliminary works, and Clear plus a new draw admits them. | §2.2: a frozen roster is not reconfigured by adding players; only Clear releases it. |
+| T7 | Transliteration (KMU Resolution 55/2010): a word starts after any character that is not a letter or apostrophe, so both parts of a double name are word-initial; case follows the source (a fully capitalized word stays capitalized); characters outside the Ukrainian table are kept unchanged and named in a notice. A destination is written only when its source has text, and overwriting a non-empty different English value asks once for both fields. The transliteration table and its tests are the only frontend files allowed to contain Cyrillic. | §4; the official table defines letters, not word boundaries or casing. |
+| T8 | The rating is edited as text and converted on Save; an empty or non-integer value, or one outside −1000…4000, shows an inline error and sends nothing. | §5.1 "deliberate handling, never silent coercion". |
+| T9 | "App only" is a disclosure button beside the field (outside its `<label>`, so the input keeps its label); the explanation opens by click, tap or keyboard and closes with Escape or on leaving the button. | §6: hover-only titles are insufficient. |
+| T10 | Pairing editor: the players and the result form a highlighted first group; "Result by referee decision", draw allowance, bye conversion, board, handicap, komi, comment and protection follow under "Other settings". Result options lead with the legacy code (`1-0 — Black wins`). | §7.1 lists the referee flag among the secondary settings; §7.2 keeps the recognizable codes. |
+| T11 | The current-round navigator is rendered by the Standings page only; Pairings keeps its "Pairings — round N" heading. | §3. |
 
 ## Open questions (for the referee / owner)
 

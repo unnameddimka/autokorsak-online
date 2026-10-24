@@ -158,6 +158,32 @@ export function NotImplementedBadge({ label }: { label?: string }) {
   return <span className="badge badge-muted" title={t('common.notImplementedHint')}>{label ?? t('common.notImplemented')}</span>;
 }
 
+/**
+ * Marks a field that is stored in this application but not in the legacy XML file (spec 0003 §6). The explanation
+ * opens from a real button, so it works with mouse, touch and keyboard (Escape closes it), not only on hover.
+ */
+export function AppOnlyBadge() {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  return (
+    <span className="app-only-wrap">
+      <button
+        type="button"
+        className="app-only"
+        aria-expanded={open}
+        aria-controls={id}
+        onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }}
+        onKeyDown={(e) => { if (e.key === 'Escape' && open) { e.preventDefault(); e.stopPropagation(); setOpen(false); } }}
+        onBlur={() => setOpen(false)}
+      >
+        {t('appOnly.label')} <span aria-hidden="true">ⓘ</span>
+      </button>
+      {open && <span id={id} role="note" className="app-only-popover">{t('appOnly.explanation')}</span>}
+    </span>
+  );
+}
+
 export function Checkbox({ label, checked, onChange, disabled, hint }: {
   label: ReactNode; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean; hint?: ReactNode;
 }) {

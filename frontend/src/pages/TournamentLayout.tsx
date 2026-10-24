@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState, useSyncExternalStore } from 'react';
-import { Link, NavLink, Outlet, useLocation, useParams } from 'react-router-dom';
+import { Link, NavLink, Outlet, useParams } from 'react-router-dom';
 import { api } from '../api/client';
 import type { ExportReport, Standings, Tournament, TournamentView } from '../api/types';
 import { Modal, Notice, useToast } from '../components/common';
@@ -43,7 +43,6 @@ export function useTournament(): TournamentContextValue {
 export function TournamentLayout() {
   const { id = '' } = useParams();
   const { t, tk } = useI18n();
-  const location = useLocation();
   const [view, setView] = useState<TournamentView | null>(null);
   const [standings, setStandings] = useState<Standings | null>(null);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -85,7 +84,6 @@ export function TournamentLayout() {
   if (!view) return <div className="page loading">{t('common.loading')}</div>;
 
   const tournament = view.tournament;
-  const showRoundNav = !location.pathname.endsWith('/settings');
 
   return (
     <TournamentContext.Provider value={{ view, tournament, standings, run }}>
@@ -105,14 +103,14 @@ export function TournamentLayout() {
           <NavLink to="players">{t('nav.players')}</NavLink>
           <NavLink to="settings">{t('nav.settings')}</NavLink>
         </nav>
-        {showRoundNav && <RoundNavigator />}
         <Outlet />
       </section>
     </TournamentContext.Provider>
   );
 }
 
-function RoundNavigator() {
+/** The single current-round control (spec 0003 §3: shown on the Standings page only). */
+export function RoundNavigator() {
   const { tournament, run } = useTournament();
   const { t } = useI18n();
   const toast = useToast();

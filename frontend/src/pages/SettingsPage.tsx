@@ -46,6 +46,7 @@ export function NewTournamentPage() {
         initial={defaults()}
         legacyKind={null}
         systemLocked={false}
+        stages={NEW_STAGES}
         submitLabel={t('tournament.create')}
         onSubmit={async (input) => {
           const view = await api.createTournament(input);
@@ -67,6 +68,7 @@ export function TournamentSettingsPage() {
       initial={fromTournament(tournament)}
       legacyKind={tournament.legacyKind}
       systemLocked={view.systemLocked}
+      stages={{ multiple: tournament.stages.length > 1, roundRobinDrawn: tournament.stages[0]?.frozenRosterIds != null }}
       submitLabel={t('common.save')}
       onSubmit={async (input) => {
         await run(() => api.updateSettings(tournament.id, input));
@@ -76,10 +78,15 @@ export function TournamentSettingsPage() {
   );
 }
 
-function SettingsForm({ initial, legacyKind, systemLocked, submitLabel, onSubmit, onCancel }: {
+/** What the round-count field needs to know about the pairing stages (spec 0003 §2.2). */
+interface StageInfo { multiple: boolean; roundRobinDrawn: boolean }
+const NEW_STAGES: StageInfo = { multiple: false, roundRobinDrawn: false };
+
+function SettingsForm({ initial, legacyKind, systemLocked, stages, submitLabel, onSubmit, onCancel }: {
   initial: SettingsInput;
   legacyKind: number | null;
   systemLocked: boolean;
+  stages: StageInfo;
   submitLabel: string;
   onSubmit: (input: SettingsInput) => Promise<void>;
   onCancel?: () => void;
@@ -152,7 +159,7 @@ function SettingsForm({ initial, legacyKind, systemLocked, submitLabel, onSubmit
       {error !== null && <Notice kind="error">{errorMessage(error, tk)}</Notice>}
 
       <div className="settings-panel">
-        {tab === 'general' && <GeneralTab form={form} set={set} legacyKind={legacyKind} systemLocked={systemLocked} />}
+        {tab === 'general' && <GeneralTab form={form} set={set} legacyKind={legacyKind} systemLocked={systemLocked} stages={stages} />}
         {tab === 'criteria' && (
           <OrderedList
             intro={t('settings.criteriaIntro')}
@@ -249,11 +256,12 @@ function SettingsForm({ initial, legacyKind, systemLocked, submitLabel, onSubmit
   );
 }
 
-function GeneralTab({ form, set, legacyKind, systemLocked }: {
+function GeneralTab({ form, set, legacyKind, systemLocked, stages }: {
   form: SettingsInput;
   set: <K extends keyof SettingsInput>(key: K, value: SettingsInput[K]) => void;
   legacyKind: number | null;
   systemLocked: boolean;
+  stages: StageInfo;
 }) {
   const { t } = useI18n();
   const boardSizes = BOARD_SIZES.includes(form.boardSize) ? BOARD_SIZES : [...BOARD_SIZES, form.boardSize].sort((a, b) => a - b);
@@ -314,9 +322,16 @@ function GeneralTab({ form, set, legacyKind, systemLocked }: {
             <label className="checkbox"><input type="radio" name="first" checked={form.firstMoveColor === 'white'} onChange={() => set('firstMoveColor', 'white')} /><span>{t('color.white')}</span></label>
           </div>
         </fieldset>
-        <Field label={t('settings.rounds')}>
-          <input type="number" min={1} max={50} value={form.numberOfRounds} onChange={(e) => set('numberOfRounds', Number(e.target.value) || 1)} />
-        </Field>
+        {/* Spec 0003 §2.2: a pure round robin takes its count from the draw; the server ignores any submitted value. */}
+        {form.system === 'roundRobin' && !stages.multiple ? (
+          <Field label={t('settings.rounds')} hint={stages.roundRobinDrawn ? t('settings.roundsFromDraw') : t('settings.roundsAuto')}>
+            <output className="readonly-value">{stages.roundRobinDrawn ? form.numberOfRounds : t('settings.roundsPending')}</output>
+          </Field>
+        ) : (
+          <Field label={t('settings.rounds')}>
+            <input type="number" min={1} max={50} value={form.numberOfRounds} onChange={(e) => set('numberOfRounds', Number(e.target.value) || 1)} />
+          </Field>
+        )}
       </div>
 
       <div className="stack field-wide">

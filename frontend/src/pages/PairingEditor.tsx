@@ -4,9 +4,10 @@ import type { GameResult, Pairing, PairingInput, Participant } from '../api/type
 import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/en';
-import { errorMessage, hasAwardedOutcome, roman, stageFor } from '../format';
+import { errorMessage, hasAwardedOutcome, isPureRoundRobin, roman, stageFor } from '../format';
 import { useTournament } from './TournamentLayout';
 
+// Symmetric results (1-1, 0-0, ½-½) stay unchanged when the colours are swapped.
 const FLIP: Partial<Record<GameResult, GameResult>> = { blackWins: 'whiteWins', whiteWins: 'blackWins' };
 
 export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pairing | null; roundNumber: number; onClose: () => void }) {
@@ -44,15 +45,16 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     if (pairedElsewhere.has(p.id)) return 'pairing.optionPaired';
     if (original.has(p.id)) return null;
     if (p.preliminary) return 'pairing.optionPreliminary';
-    if (p.firstEligibleRound > roundNumber) return 'pairing.optionNotJoined';
+    const pure = isPureRoundRobin(tournament); // spec 0003 §2.3: joining rounds and absences have no effect
+    if (!pure && p.firstEligibleRound > roundNumber) return 'pairing.optionNotJoined';
     if (stage.frozenRosterIds && !stage.frozenRosterIds.includes(p.id)) return 'pairing.optionNotInRoster';
-    if (p.notPlayingRounds.includes(roundNumber)) return 'pairing.optionNotPlaying';
+    if (!pure && p.notPlayingRounds.includes(roundNumber)) return 'pairing.optionNotPlaying';
     return null;
   };
   const players = [...tournament.participants].sort((a, b) => a.displayName.localeCompare(b.displayName));
 
   const playerSelect = (key: 'blackId' | 'whiteId', label: string) => (
-    <Field label={label}>
+    <Field label={<><span className={`stone stone-${key === 'blackId' ? 'black' : 'white'}`} aria-hidden="true" /> {label}</>}>
       <select value={form[key] ?? ''} onChange={(e) => set(key, e.target.value === '' ? null : Number(e.target.value))}>
         <option value="">{t('pairing.selectPlayer')}</option>
         {players.map((p) => {
@@ -116,10 +118,12 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     }
   }
 
+  // Spec 0003 §7.2: the legacy list in its order; ½-½ only when draws are allowed (or already recorded).
   const resultOptions: { value: GameResult; label: MessageKey }[] = [
     { value: 'unset', label: 'result.unset' },
     { value: 'blackWins', label: 'result.blackWins' },
     { value: 'whiteWins', label: 'result.whiteWins' },
+    { value: 'bothWin', label: 'result.bothWin' },
     { value: 'bothLose', label: 'result.bothLose' },
   ];
   if (form.allowDraw || form.result === 'draw') resultOptions.push({ value: 'draw', label: 'result.draw' });
@@ -139,9 +143,34 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
     >
       {error !== null && <Notice kind="error">{errorMessage(error, tk)}</Notice>}
       <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
+        {/* Spec 0003 §7.1: a referee opens a pairing mainly to enter its result, so players and result come first. */}
+        <div className="pairing-primary" role="group" aria-label={t('pairing.primaryGroup')}>
+          {playerSelect('blackId', t('color.black'))}
+          {form.isBye
+            ? <div className="field"><span className="field-label">{t('color.white')}</span><span className="badge">{t('pairing.bye')}</span></div>
+            : playerSelect('whiteId', t('color.white'))}
+          <div className="field-wide result-field">
+            <Field label={t('pairing.result')} hint={form.isBye ? t('pairing.byeNoResult') : undefined}>
+              <select value={form.result} disabled={form.isBye} onChange={(e) => set('result', e.target.value as GameResult)}>
+                {resultOptions.map((o) => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
+                {form.result === 'unknown' && <option value="unknown">{t('result.unknown', { token: pairing?.legacyResultToken ?? '' })}</option>}
+              </select>
+            </Field>
+          </div>
+          <div className="field-wide inline-options">
+            <button type="button" className="small" onClick={swap} disabled={form.isBye}>{t('pairing.swap')}</button>
+          </div>
+        </div>
         {isRoundRobin && (
           <p className="muted field-wide">{t('pairing.byRefereeWithdrawalHint')}</p>
         )}
+
+        <h3 className="section-label">{t('pairing.otherSettings')}</h3>
+        <div className="field field-wide">
+          <Checkbox label={t('pairing.byReferee')} checked={form.resultByReferee} onChange={(v) => set('resultByReferee', v)} />
+          <Checkbox label={t('pairing.allowDraw')} checked={form.allowDraw} onChange={(v) => set('allowDraw', v)} />
+          <Checkbox label={t('pairing.isBye')} checked={form.isBye} onChange={(v) => setForm((f) => (v ? { ...f, isBye: true, result: 'unset', resultByReferee: false } : { ...f, isBye: false }))} hint={t('pairing.byeHint')} />
+        </div>
         <Field label={t('pairing.board')} hint={isNew ? t('pairing.boardAutoHint') : undefined}>
           <input type="number" min={1} value={form.boardNumber ?? ''} placeholder={t('pairing.boardAuto')}
             onChange={(e) => set('boardNumber', e.target.value === '' ? null : Number(e.target.value))} />
@@ -150,32 +179,12 @@ export function PairingEditor({ pairing, roundNumber, onClose }: { pairing: Pair
           <Checkbox label={t('pairing.boardFixed')} checked={form.boardNumberFixed} onChange={(v) => set('boardNumberFixed', v)} />
         </div>
 
-        {playerSelect('blackId', t('color.black'))}
-        {form.isBye
-          ? <div className="field"><span className="field-label">{t('color.white')}</span><span className="badge">{t('pairing.bye')}</span></div>
-          : playerSelect('whiteId', t('color.white'))}
-        <div className="field-wide inline-options">
-          <button type="button" onClick={swap} disabled={form.isBye}>{t('pairing.swap')}</button>
-          <Checkbox label={t('pairing.isBye')} checked={form.isBye} onChange={(v) => setForm((f) => (v ? { ...f, isBye: true, result: 'unset', resultByReferee: false } : { ...f, isBye: false }))} hint={t('pairing.byeHint')} />
-        </div>
-
         <Field label={t('pairing.handicap')} hint={t('pairing.handicapUnit')}>
           <input type="number" min={0} max={9} value={form.handicap} onChange={(e) => set('handicap', Number(e.target.value) || 0)} />
         </Field>
         <Field label={t('pairing.additionalKomi')} hint={t('pairing.komiUnit')}>
           <input type="number" step={0.5} min={-50} max={50} value={form.additionalKomi} onChange={(e) => set('additionalKomi', Number(e.target.value) || 0)} />
         </Field>
-
-        <Field label={t('pairing.result')}>
-          <select value={form.result} disabled={form.isBye} onChange={(e) => set('result', e.target.value as GameResult)}>
-            {resultOptions.map((o) => <option key={o.value} value={o.value}>{t(o.label)}</option>)}
-            {form.result === 'unknown' && <option value="unknown">{t('result.unknown', { token: pairing?.legacyResultToken ?? '' })}</option>}
-          </select>
-        </Field>
-        <div className="field field-align-end">
-          <Checkbox label={t('pairing.allowDraw')} checked={form.allowDraw} onChange={(v) => set('allowDraw', v)} />
-          <Checkbox label={t('pairing.byReferee')} checked={form.resultByReferee} onChange={(v) => set('resultByReferee', v)} />
-        </div>
 
         <Field label={t('pairing.comment')} wide>
           <input value={form.comment} onChange={(e) => set('comment', e.target.value)} />

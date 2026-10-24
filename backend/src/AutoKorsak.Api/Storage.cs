@@ -105,7 +105,8 @@ public sealed class Storage
             cmd.Parameters.AddWithValue("$id", t.Id.ToString());
             cmd.Parameters.AddWithValue("$name", t.Name);
             cmd.Parameters.AddWithValue("$players", t.Participants.Count);
-            cmd.Parameters.AddWithValue("$rounds", t.NumberOfRounds);
+            // 0 = not known yet: a pure round robin derives its count at the draw (spec 0003 §2.2).
+            cmd.Parameters.AddWithValue("$rounds", t.RoundCountPending() ? 0 : t.NumberOfRounds);
             cmd.Parameters.AddWithValue("$updated", t.UpdatedAt.ToString("O"));
             cmd.Parameters.AddWithValue("$data", JsonSerializer.Serialize(t, Json));
             cmd.ExecuteNonQuery();

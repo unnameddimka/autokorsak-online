@@ -31,6 +31,7 @@ export function resultLabel(result: GameResult, t: T, legacyToken?: string | nul
   switch (result) {
     case 'blackWins': return '1-0';
     case 'whiteWins': return '0-1';
+    case 'bothWin': return '1-1';
     case 'bothLose': return '0-0';
     case 'draw': return '½-½';
     case 'unknown': return legacyToken ?? '?';
@@ -52,6 +53,36 @@ export function errorMessage(error: unknown, tk: TK): string {
 export function stageFor(t: Tournament, round: number): PairingStage {
   const stages = t.stages.length > 0 ? t.stages : [{ startRound: 1, system: t.system, frozenRosterIds: null, randomStartingNumbers: false }];
   return [...stages].reverse().find((s) => s.startRound <= round) ?? stages[0];
+}
+
+/**
+ * Spec 0003 §2.1: one round-robin stage from round 1. Its round count comes from the draw, and joining rounds and
+ * per-round availability have no effect (the server ignores them).
+ */
+export function isPureRoundRobin(t: Tournament): boolean {
+  const stages = t.stages.length > 0 ? t.stages : [stageFor(t, 1)];
+  return stages.length === 1 && stages[0].startRound === 1 && stages[0].system === 'roundRobin';
+}
+
+/** A pure round robin before its draw: the stored number of rounds is only provisional. */
+export function roundCountPending(t: Tournament): boolean {
+  return isPureRoundRobin(t) && !stageFor(t, 1).frozenRosterIds;
+}
+
+/** Whether the player takes part in a round, as the server decides it (always in a pure round robin). */
+export function playsInRound(t: Tournament, p: Pick<Participant, 'firstEligibleRound' | 'notPlayingRounds'>, round: number): boolean {
+  return isPureRoundRobin(t) || roundParticipation(p, round) === 'plays';
+}
+
+export const RATING_MIN = -1000;
+export const RATING_MAX = 4000;
+
+/** Parses a typed rating: a whole number in the server's range, otherwise 'invalid' (an empty field included). */
+export function parseRating(text: string): number | 'invalid' {
+  const trimmed = text.trim().replace(/^−/, '-');
+  if (!/^-?\d+$/.test(trimmed)) return 'invalid';
+  const value = Number(trimmed);
+  return value >= RATING_MIN && value <= RATING_MAX ? value : 'invalid';
 }
 
 /**

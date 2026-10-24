@@ -3,7 +3,7 @@ import { api, ApiError } from '../api/client';
 import type { Pairing, Participant, TournamentSystem } from '../api/types';
 import { Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, resultLabel, roman, stageEnd, stageFor, systemLabel } from '../format';
+import { errorMessage, formatRank, playsInRound, resultLabel, roman, stageEnd, stageFor, systemLabel } from '../format';
 import { useTournament } from './TournamentLayout';
 import { PairingEditor } from './PairingEditor';
 import { RoundRobinPanel } from './RoundRobinPanel';
@@ -18,7 +18,7 @@ export function PairingsPage() {
 
   const paired = new Set(pairings.flatMap((p) => [p.blackId, p.isBye ? null : p.whiteId]).filter((x): x is number => x !== null));
   const unpaired = tournament.participants.filter((p) => !paired.has(p.id));
-  const eligible = (p: Participant) => !p.preliminary && p.firstEligibleRound <= roundNumber && !p.notPlayingRounds.includes(roundNumber);
+  const eligible = (p: Participant) => !p.preliminary && playsInRound(tournament, p, roundNumber);
   const available = unpaired.filter(eligible);
   const unavailable = unpaired.filter((p) => !eligible(p));
   const reason = (p: Participant) =>
@@ -59,11 +59,11 @@ export function PairingsPage() {
                   {p.boardNumber}
                   {p.boardNumberFixed && <span className="flag" title={t('pairing.boardFixed')}>📌</span>}
                 </td>
-                <td><PlayerCell player={p.blackId !== null ? byId.get(p.blackId) : undefined} winner={p.result === 'blackWins' || p.isBye} /></td>
+                <td><PlayerCell player={p.blackId !== null ? byId.get(p.blackId) : undefined} winner={p.result === 'blackWins' || p.result === 'bothWin' || p.isBye} /></td>
                 <td>
                   {p.isBye
                     ? <span className="badge">{t('pairing.bye')}</span>
-                    : <PlayerCell player={p.whiteId !== null ? byId.get(p.whiteId) : undefined} winner={p.result === 'whiteWins'} />}
+                    : <PlayerCell player={p.whiteId !== null ? byId.get(p.whiteId) : undefined} winner={p.result === 'whiteWins' || p.result === 'bothWin'} />}
                 </td>
                 <td className="num">
                   {p.isBye ? '+1' : resultLabel(p.result, t, p.legacyResultToken)}

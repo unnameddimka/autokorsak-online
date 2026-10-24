@@ -1,9 +1,11 @@
 # Status
 
-**Current version:** spec 0001 (pairing stages, round robin, bye scoring, score-group view) on top of spec 0000,
-2026-10-16. Spec 0000 was accepted after review (final version `8fd3898`); spec 0001 was accepted after review
-(final version `b565ad20`). Spec 0002 (manual starting numbers, round-count adjustment, clear draw) was implemented
-in `4ecfd464` and reviewed; this version contains the review corrections and awaits re-review. The live container still runs the 0001 version until the owner asks to redeploy.
+**Current version:** spec 0003 (referee usability: automatic round-robin round count, pure round-robin participation,
+Standings-only round control, transliteration, rating input, app-only explanation, result-first pairing editor with
+the "both win" result), implemented 2026-10-24 on top of specs 0000–0002, **awaiting GPT-6 review**. Spec 0000 was
+accepted after review (final version `8fd3898`), and so were spec 0001 (final version `b565ad20`) and spec 0002
+(final version `6821a5b6`, accepted in `ea951a2`). The live container on `:8080` was not redeployed; it still runs
+an earlier version until the owner asks to redeploy.
 
 ## What works
 
@@ -37,7 +39,8 @@ in `4ecfd464` and reviewed; this version contains the review corrections and awa
     keep a disabled, retained draft.
   - The draw uses either the entered numbers (exactly 1..N, with errors that name the players and numbers) or a random
     overwrite chosen in a two-action dialog.
-  - A terminal round robin with the wrong round count offers a confirmed, atomic resize-and-draw.
+  - ~~A terminal round robin with the wrong round count offers a confirmed, atomic resize-and-draw.~~ Replaced by the
+    automatic count of spec 0003.
   - "Clear round-robin draw" removes all stage pairings (byes included) when no game has a result, and keeps the
     numbers as drafts. If nothing else remains, Settings unlocks again.
   - Any entered game result locks round-robin generation and clearing until every result is removed.
@@ -45,15 +48,63 @@ in `4ecfd464` and reviewed; this version contains the review corrections and awa
   to round 1. Rounds before it are neither pairable nor skipped rounds. Round-robin admission rules are enforced,
   and "finalize all" finalizes the eligible players and reports skipped ones with reasons.
 - **Rounds:** previous/next/direct selection of the current round, and an "include current round in calculations"
-  switch.
+  switch. Since spec 0003 this control is on the Standings page only; Pairings names the round in its heading.
 - **Standings:** wins/points, SOS, SODOS, SOSOS, shared places, and per-round opponent/result cells with an
   optional color marker. A bye counts as one win and one point (0001). They recalculate after every change. Notices
   explain unsupported situations. The optional **"Sort by rating within score groups"** preparation view (0001)
   orders players by points from earlier rounds, then rating; the preference is remembered per tournament.
+- **Spec 0003 (referee usability):**
+  - **Pure round robin** (one round-robin stage from round 1): Settings shows the number of rounds read-only ("at the
+    draw" before it); the first successful draw sets it from the final roster (N − 1 / N) with no confirmation, and the
+    server ignores submitted counts. A frozen draw keeps roster and count until Clear. The tournament list shows "at
+    the draw" too.
+  - Joining-round and per-round availability controls are hidden in the player card and the Players list; the server
+    ignores those fields for a pure round robin (stored values are kept but have no effect). Nonappearance is a normal
+    referee-decided result.
+  - **Transliterate** button in the player card (official Ukrainian table, KMU Resolution 55/2010), with confirmation
+    before overwriting English names; unsupported characters are kept and reported.
+  - Rating is typed as text (no forced leading zero) and validated on Save; rating 0 is shown as 0 everywhere.
+  - **App only** fields have an accessible explanation (button, keyboard, touch) that says what is lost in an old-format
+    XML round-trip and that the data stays in the app.
+  - Pairing editor: players and the **Result** list come first; the list is ?-?, 1-0, 0-1, **1-1 (both win)**, 0-0, and
+    ½-½ when draws are allowed. 1-1 gives each player one point and one win, counts as an entered result for all locks
+    and confirmations, survives colour swaps, and imports/exports as the legacy token `1-1` (verified from the legacy
+    serializer, decision T1).
 - **Shared catalog:** search when adding a player, and an explicit upsert with create/update counts, confirmation,
   and a per-player decision for possible namesakes.
 
-## Test results (2026-10-16)
+## Test results (2026-10-24, spec 0003)
+
+- Backend (`docker compose --profile test run --rm backend-tests`): **140 passed, 0 failed** (125 before; 15 added,
+  10 rewritten). `Spec0003Tests`: six players → 5 rounds with Settings unable to set or overwrite the count; three
+  players with a stale count → 3 rounds with byes; preliminary players excluded and a one-player draw failing without
+  writes; editable counts for other systems; an unsafe shrink failing atomically; roster and count stable until Clear,
+  then recalculated; hidden join/skip flags ignored but kept (draw, roster, standings cells and notices); finalizing and
+  numbering with stale joining rounds; a round robin followed by Swiss keeping the 0001 rules; a technical defeat as a
+  referee result; 1-1 scoring (wins, SOS, SODOS, shared place, preparation view, no notice); 1-1 colour swap, discard
+  protection and JSON persistence; legacy `1-1` import with an unchanged deep-equal export; a new 1-1 exporting as
+  `1-1` without a limitation, an unknown token (`S-S`) staying opaque, and a draw still reported. API: forged Settings
+  count ignored, list placeholder before the draw, server-derived count with a forged `roundCount`, `bothWin`
+  persisted and scored. Rewritten 0001/0002 tests: the round-count prompt became an automatic resize, and the pure
+  round-robin joining/availability refusals became "input ignored, nothing changes".
+- Frontend (`docker compose --profile test run --rm frontend-tests`): typecheck clean; **48 passed, 0 failed** (24
+  before; 24 added, the two round-count dialog tests rewritten): transliteration against the official table and the
+  spec examples; card transliteration with confirm/cancel, empty source and a full name in one field; rating 0 → 50 and
+  invalid/empty input; no join/skip controls in a pure round robin (kept for Swiss); the app-only explanation by button
+  and Escape, with the input keeping its label; rating 0 in the Players and Standings tables; no join/availability
+  columns; the round control on Standings only and the Pairings round heading; result list order, conditional ½-½, a
+  kept recorded draw, 1-1 on colour swap and saving `bothWin`; the RR panel sending one request with no round-count
+  dialog. The localization guard now allows Cyrillic only in `transliteration.ts` and its test.
+- Production build: the Docker image (Vite build and `dotnet publish`) builds cleanly.
+- Smoke (headless Chrome on a disposable container at `127.0.0.1:8091`, removed afterwards; the live `:8080` instance
+  was not touched): **52 checks passed in uk and en, no page or console errors**: Settings ignoring a submitted count,
+  "at the draw" in the list and Settings, no join/availability columns or card controls, rating 0 shown and edited to
+  50 by typing, transliteration (Stetsenko Oleksii) and saving, the app-only explanation by keyboard with Escape
+  keeping the card open, no round control on Players/Pairings, a draw of 3 final players (+1 preliminary) giving 3
+  rounds with byes and no dialog, the result-first editor with ?-?/1-0/0-1/1-1/0-0, saving 1-1 (one win each), the
+  round chosen on Standings driving Pairings, the 1-1 generation lock, and the drawn count read-only in Settings.
+
+## Earlier test results (2026-10-16)
 
 - Backend (`docker compose --profile test run --rm backend-tests`): **125 passed, 0 failed**. Coverage: reference
   fixture import shape; round VI pairings versus the legacy TXT export; the exact standings and tie-breaks from
@@ -129,7 +180,12 @@ in `4ecfd464` and reviewed; this version contains the review corrections and awa
 ## Known limitations
 
 - Skipped rounds, draws, both-lose results, and McMahon start scores in the official standings are not scored
-  correctly yet. They are flagged with notices. The calculation settings are stored but have no effect.
+  correctly yet. They are flagged with notices (the owner kept 0-0 and ½-½ unchanged in spec 0003, decision T4). The
+  calculation settings are stored but have no effect. "Both win" (1-1) is fully scored.
+- The legacy draw token `½-½` is now evidenced by the legacy serializer (decision T2), but draws are still exported as
+  `?-?` and reported, and an imported `½-½` stays an opaque result. A later spec can map it.
+- A round robin followed by another system is set up by adding the stage while the count is still provisional;
+  Settings edits the count again once the tournament has two stages.
 - Automatic Swiss, McMahon and Scheveningen pairing is not implemented. Moving or removing stage boundaries, and a
   round-robin stage after another system, are deferred (spec 0001 §1.1).
 - A pure round-robin tournament cannot be exported to legacy XML (round-robin `Kind` code unverified). A round robin
@@ -153,8 +209,8 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. Re-review of the spec 0002 corrections (see the review log).
-2. Redeploy the live container when the owner asks.
+1. GPT-6 review of the spec 0003 implementation.
+2. Redeploy the live container when the owner asks (it does not include 0002 or 0003 yet).
 3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
 4. Next specs (likely candidates: automatic Swiss/McMahon pairing, skipped-round scoring).
@@ -167,4 +223,5 @@ assistant wizard, authentication, other board games, SORP result points.
 | 2026-10-16 | GPT-6 (re-review) | `bfe922c8` | All six previous findings closed. 1× P2: an explicit absence (`NotPlayingRounds`) in a counted round raised no skipped-round notice before any result existed. | Fixed with 4 regression tests; see [review/0000-rereview-gpt6-bfe922c8-response.md](review/0000-rereview-gpt6-bfe922c8-response.md). Awaiting final re-review. |
 | 2026-10-16 | GPT-6 | `e7b57590` (spec 0001) | 1× P1 (frozen RR member could be made unavailable, blocking generation), 4× P2 (Settings lock lost after deleting pairings; unplayed colour swaps kept; credited bye not treated as an outcome; Players list showed pre-joining rounds as available). | All five fixed with regression tests; see [review/0001-review-gpt6-e7b57590-response.md](review/0001-review-gpt6-e7b57590-response.md). Closed on re-review. |
 | 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Accepted (final review `bf8d235`). |
-| 2026-10-16 | GPT-6 | `4ecfd464` (spec 0002) | 1× P1 (the player card rejected every non-empty starting number, including unchanged frozen ones, because of a broken digit check), 2× P2 (a typed 0 silently cleared a draft; Clear could discard unsaved table edits). | All three fixed with regression tests; see [review/0002-review-gpt6-4ecfd464-response.md](review/0002-review-gpt6-4ecfd464-response.md). Awaiting re-review. |
+| 2026-10-16 | GPT-6 | `4ecfd464` (spec 0002) | 1× P1 (the player card rejected every non-empty starting number, including unchanged frozen ones, because of a broken digit check), 2× P2 (a typed 0 silently cleared a draft; Clear could discard unsaved table edits). | All three fixed with regression tests; see [review/0002-review-gpt6-4ecfd464-response.md](review/0002-review-gpt6-4ecfd464-response.md). |
+| 2026-10-16 | GPT-6 (re-review) | `6821a5b6` (spec 0002) | All three findings closed; no new blocking issue. | Accepted; see [review/0002-rereview-gpt6-6821a5b6.md](review/0002-rereview-gpt6-6821a5b6.md). |

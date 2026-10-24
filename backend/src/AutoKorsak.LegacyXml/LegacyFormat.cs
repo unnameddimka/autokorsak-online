@@ -81,12 +81,17 @@ internal static class LegacyFormat
         _ => CriterionKeys.LegacyPrefix + token,
     };
 
+    /// <summary>
+    /// "1-0", "0-1", "0-0" and "?-?" are observed in fixtures. "1-1" (both win) is taken from the legacy serializer
+    /// (<c>Tourtoss.BE.Pair.Result</c> in AutoKorsak 1.38, decision T1). A draw stays unmapped (spec 0003 §7.3).
+    /// </summary>
     public static string? ResultToken(GameResult result) => result switch
     {
         GameResult.Unset => "?-?",
         GameResult.BlackWins => "1-0",
         GameResult.WhiteWins => "0-1",
         GameResult.BothLose => "0-0",
+        GameResult.BothWin => "1-1",
         _ => null,
     };
 
@@ -96,6 +101,7 @@ internal static class LegacyFormat
         "1-0" => GameResult.BlackWins,
         "0-1" => GameResult.WhiteWins,
         "0-0" => GameResult.BothLose,
+        "1-1" => GameResult.BothWin,
         _ => GameResult.Unknown,
     };
 

@@ -1,6 +1,6 @@
 # Architecture
 
-Current state as of spec 0002. Keep this document in sync with the code.
+Current state as of spec 0003. Keep this document in sync with the code.
 
 ## Components
 
@@ -29,8 +29,9 @@ In production, one container serves the compiled SPA (`wwwroot`) and the API on 
 - `GET/POST /api/tournaments`, `POST /api/tournaments/import` (multipart `file`), `GET/DELETE /api/tournaments/{id}`
 - `PUT …/settings`, `PUT …/round` (current round + include flag), `GET …/standings`, `GET …/standings/preparation`
 - `POST …/stages` `{ startRound, system, confirmDeleteUnplayed }`: change the pairing system starting from a round
-- `POST …/rounds/{n}/generate` `{ allRounds, source: "entered" | "random", confirmReplace, roundCount }`: round-robin
-  generation. `roundCount` carries a confirmed round-count adjustment (spec 0002).
+- `POST …/rounds/{n}/generate` `{ allRounds, source: "entered" | "random", confirmReplace }`: round-robin
+  generation. The server derives the round count of a pure round robin itself (spec 0003); a `roundCount` sent by an
+  older client is ignored.
 - `POST …/rounds/{n}/clear-round-robin` `{ confirm }`: clear the round-robin draw. `confirm=false` is a preflight that
   answers 409 `clear.confirm` with the counts.
 - `PUT …/starting-numbers` `{ entries: [{ participantId, number }] }`: atomic batch save of draft starting numbers.
@@ -53,6 +54,8 @@ cannot add it without a CORS preflight, and the server never approves preflights
 - `tournaments` table: one row per tournament. The **whole aggregate is stored as a JSON document** (`data`), and
   the list columns (`name`, `player_count`, …) are denormalized. Saves are atomic, and an API-level lock
   serializes writes (P0 assumes a single local referee).
+- The list column `round_count` is `0` for a pure round robin before its draw (count not known yet, spec 0003); the
+  list shows a placeholder instead of the provisional value.
 - `catalog_entries` table: one JSON document per shared player entry.
 - A catalog upsert writes the tournament (new links) and the catalog entries in one transaction.
 
@@ -93,18 +96,31 @@ cannot add it without a CORS preflight, and the server never approves preflights
   - **Starting numbers:** a first draw uses either the entered numbers (exactly 1..N among the N eligible players,
     otherwise a structured `generate.startingNumbersInvalid` error) or one random permutation that overwrites the
     eligible players' drafts. There is no implicit registration order.
-  - **Round count:** a terminal round-robin stage whose total round count differs from one cycle answers 409
-    `generate.roundCountAdjustment`. The confirmed `roundCount` resizes and draws in one mutation. Shrinking is refused
-    while the trimmed rounds hold pairings, stage starts, joining rounds or availability marks.
+  - **Round count:** replaced by spec 0003 (see below); the 409 `generate.roundCountAdjustment` prompt no longer exists.
   - **Clear:** removes every pairing of the stage (games, byes, manual, protected), unfreezes the roster, and keeps the
     last numbers as drafts. Only when the tournament is left with one stage and no pairings does it reset
     `PairingsEverDrawn` (the sole exception to the monotonic Settings lock).
+
+- Spec 0003 rules (**pure round robin** = one stage, from round 1, with the round-robin system;
+  `Tournament.IsPureRoundRobin()`):
+  - **Round count:** Settings ignores the submitted number of rounds; the stored value is only provisional until the
+    first successful draw, which sets it to one cycle of the drawn roster (N − 1 for even N, N for odd N) in the same
+    mutation as the frozen roster and the pairings, without confirmation. Shrinking is still refused (409
+    `generate.roundCountShrinkBlocked`) while the trimmed rounds hold pairings or a stage start. A frozen draw keeps its
+    count; after Clear the next draw recalculates. Other systems, and a round robin followed by another stage, keep the
+    editable count.
+  - **Participation:** joining rounds and per-round absences have no effect (`Tournament.Plays`, `HasJoined`,
+    `EffectiveJoinRound`): every finalized player is eligible for the draw, pairable in every round, and never shown
+    as "not joined" or "not playing". New participants get round 1 and no absences; for existing ones the stored values
+    are kept unchanged and input for them is ignored. Nonappearance is a normal referee-decided result.
+  - **Both win** (`GameResult.BothWin`, legacy token `1-1`): one point and one win for each player.
 
 ## Standings calculation
 
 Only counted rounds take part: rounds `1..CurrentRound`, minus the current round when `IncludeCurrentRound` is off.
 
-- win = 1, draw = ½ (simplified), both lose = 0, **bye = one win and one point** (spec 0001 §4; no opponent);
+- win = 1, **both win (1-1) = one win and one point for each player** (spec 0003), draw = ½ (simplified), both lose = 0,
+  **bye = one win and one point** (spec 0001 §4; no opponent);
 - SOS = sum of opponents' points;
 - SODOS = sum over games of own game score × opponent's points;
 - SOSOS = sum of opponents' SOS.
@@ -129,9 +145,10 @@ reuse it.
   table, who moves first, plays **Black**. An odd roster uses an internal empty slot n, and its partner gets the
   bye. The fixture index is `round − stage.StartRound`.
 - **Generation** (`GenerateRoundRobin`):
-  1. Resolve the roster: the frozen one, or the finalized players joining by the stage start, in ID order or one
-     random permutation.
-  2. Check the stage length: exactly one cycle for a final stage, at most one cycle otherwise.
+  1. Resolve the roster: the frozen one, or the finalized players joining by the stage start (every finalized player in
+     a pure round robin), by entered starting numbers or one random permutation.
+  2. Check the stage length: a final stage is resized to exactly one cycle (spec 0003), an earlier one may be at most
+     one cycle.
   3. Plan every requested round. Pairings with an awarded outcome must match a slot (a played game: same two
      players in either colour; a credited bye: the fixture bye) or the whole request fails. Unplayed games are kept
      only in the exact Berger orientation; other unplayed pairings are replaced, after confirmation.

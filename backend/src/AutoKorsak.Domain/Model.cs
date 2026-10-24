@@ -15,6 +15,8 @@ public enum GameResult
     BothLose,
     /// <summary>Jigo. No verified legacy token exists yet.</summary>
     Draw,
+    /// <summary>Both players win: one point and one win each (spec 0003 §7.2, legacy token "1-1").</summary>
+    BothWin,
     /// <summary>A legacy token this application does not understand; kept in <see cref="Pairing.LegacyResultToken"/>.</summary>
     Unknown,
 }
@@ -126,6 +128,31 @@ public sealed class Tournament
     }
 
     public bool HasLaterStage(PairingStage stage) => Stages.Any(s => s.StartRound > stage.StartRound);
+
+    /// <summary>
+    /// One round-robin stage from round 1 (spec 0003 §2.1). Its round count follows the drawn roster, and the stored
+    /// joining round and per-round absences of participants are ignored (kept, but without effect).
+    /// </summary>
+    public bool IsPureRoundRobin()
+    {
+        EnsureStages();
+        return Stages.Count == 1 && Stages[0].StartRound == 1 && Stages[0].IsRoundRobin;
+    }
+
+    /// <summary>
+    /// A pure round robin before its draw: <see cref="NumberOfRounds"/> is only a provisional value until the draw
+    /// derives the real count (spec 0003 §2.2).
+    /// </summary>
+    public bool RoundCountPending() => IsPureRoundRobin() && !Stages[0].IsFrozen;
+
+    /// <summary>The participant takes part in <paramref name="round"/>; always true in a pure round robin.</summary>
+    public bool Plays(Participant p, int round) => IsPureRoundRobin() || p.PlaysInRound(round);
+
+    /// <summary>The participant has joined by <paramref name="round"/>; always true in a pure round robin.</summary>
+    public bool HasJoined(Participant p, int round) => IsPureRoundRobin() || p.HasJoinedBy(round);
+
+    /// <summary>The joining round that rules apply to: round 1 in a pure round robin, otherwise the stored one.</summary>
+    public int EffectiveJoinRound(Participant p) => IsPureRoundRobin() ? 1 : p.FirstEligibleRound;
 }
 
 public sealed class CriterionSetting

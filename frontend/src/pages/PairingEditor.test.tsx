@@ -76,3 +76,48 @@ describe('pairing editor deletion', () => {
     await waitFor(() => expect(utils.deletePairing).toHaveBeenCalledWith('t1', 7, false));
   });
 });
+
+describe('pairing editor result list (spec 0003 §7)', () => {
+  const game: Pairing = { ...base, isBye: false, whiteId: 2 };
+  const resultSelect = (u: ReturnType<typeof renderEditor>) => u.getByLabelText('Result') as HTMLSelectElement;
+  const codes = (u: ReturnType<typeof renderEditor>) => [...resultSelect(u).options].map((o) => o.textContent!.split(' ')[0]);
+
+  it('puts both colour-labelled players and the result first, other settings after them', () => {
+    const u = renderEditor(game);
+    const form = u.baseElement.querySelector('dialog form')!;
+    const primary = form.firstElementChild as HTMLElement;
+    expect(primary.getAttribute('aria-label')).toBe('Players and result');
+    expect(within(primary).getByLabelText(/Black/)).toBeTruthy();
+    expect(within(primary).getByLabelText(/White/)).toBeTruthy();
+    expect(within(primary).getByLabelText('Result')).toBeTruthy();
+    expect(within(primary).queryByLabelText(/^Board/)).toBeNull();
+    expect(u.getByLabelText(/^Board/)).toBeTruthy(); // secondary settings stay operable
+  });
+
+  it('offers the legacy codes in order, with 1-1, and ½-½ only when draws are allowed', () => {
+    const u = renderEditor(game);
+    expect(codes(u)).toEqual(['?-?', '1-0', '0-1', '1-1', '0-0']);
+    cleanup();
+    const withDraws = renderEditor({ ...game, allowDraw: true });
+    expect(codes(withDraws)).toEqual(['?-?', '1-0', '0-1', '1-1', '0-0', '½-½']);
+  });
+
+  it('keeps a recorded draw selectable after draws were disallowed, and keeps 1-1 on a colour swap', () => {
+    const draw = renderEditor({ ...game, result: 'draw' });
+    expect(codes(draw)).toContain('½-½');
+    expect(resultSelect(draw).value).toBe('draw');
+    cleanup();
+    const both = renderEditor({ ...game, result: 'bothWin' });
+    fireEvent.click(both.getByRole('button', { name: 'Swap colors' }));
+    expect(resultSelect(both).value).toBe('bothWin');
+  });
+
+  it('sends bothWin when 1-1 is chosen', async () => {
+    const u = renderEditor(game);
+    const update = vi.spyOn(api, 'updatePairing').mockResolvedValue({} as TournamentView);
+    fireEvent.change(resultSelect(u), { target: { value: 'bothWin' } });
+    fireEvent.click(u.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(1));
+    expect(update.mock.calls[0][2]).toMatchObject({ result: 'bothWin' });
+  });
+});

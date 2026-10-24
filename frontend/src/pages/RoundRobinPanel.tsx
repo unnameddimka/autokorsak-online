@@ -93,25 +93,19 @@ export function RoundRobinPanel() {
     if (choice) void generate(choice);
   }
 
-  /** Step 2: round-count adjustment and replacement confirmations, then one final request. */
-  async function generate(source: StartingNumberSource, roundCount: number | null = null, confirmReplace = false): Promise<void> {
+  /**
+   * Step 2: the replacement confirmation, then one final request. The server derives the round count of a pure round
+   * robin from the drawn roster without asking (spec 0003 §2.2).
+   */
+  async function generate(source: StartingNumberSource, confirmReplace = false): Promise<void> {
     setBusy(true);
     try {
-      const next = await run(() => api.generate(tournament.id, round, { allRounds, source, roundCount, confirmReplace }));
+      const next = await run(() => api.generate(tournament.id, round, { allRounds, source, confirmReplace }));
       const r = next.result as GenerationResult;
       setNumbersError(null);
       toast.success(t('generate.done', { created: r.created, replaced: r.replaced, kept: r.kept }));
     } catch (e) {
       setBusy(false);
-      if (e instanceof ApiError && e.code === 'generate.roundCountAdjustment') {
-        const ok = await confirm({
-          title: t('generate.adjustTitle'),
-          message: t('generate.adjustMessage', e.args),
-          confirmLabel: t('generate.adjustConfirm', e.args),
-        });
-        if (ok) await generate(source, Number(e.args.required), confirmReplace);
-        return;
-      }
       if (e instanceof ApiError && e.code === 'generate.replaceUnplayed') {
         const ok = await confirm({
           title: t('generate.replaceTitle'),
@@ -119,7 +113,7 @@ export function RoundRobinPanel() {
           confirmLabel: t('generate.replaceConfirm'),
           danger: true,
         });
-        if (ok) await generate(source, roundCount, true);
+        if (ok) await generate(source, true);
         return;
       }
       if (e instanceof ApiError && e.code === 'generate.startingNumbersInvalid') {

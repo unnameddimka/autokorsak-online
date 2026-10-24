@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { api, ApiError } from '../api/client';
+import { api } from '../api/client';
 import type { Tournament, TournamentView } from '../api/types';
 import { I18nProvider } from '../i18n';
 import { ConfirmProvider, ToastProvider } from '../components/common';
@@ -48,14 +48,11 @@ function setup() {
   return { ...utils, view, openDialog };
 }
 
-const adjustment = new ApiError('generate.roundCountAdjustment', { players: 4, required: 3, current: 5 }, 409);
-
 describe('round-robin generation dialogs', () => {
-  it('asks for the number source first, then the round count, then sends one final request', async () => {
+  it('asks for the number source first, then sends one request without a round-count prompt (spec 0003)', async () => {
     const u = setup();
     const generate = vi.spyOn(api, 'generate')
-      .mockRejectedValueOnce(adjustment)
-      .mockResolvedValueOnce({ ...u.view, result: { created: 6, replaced: 0, kept: 0 } } as TournamentView);
+      .mockResolvedValueOnce({ ...u.view, result: { created: 6, replaced: 0, kept: 0, numberOfRounds: 3 } } as TournamentView);
     fireEvent.click(u.getByLabelText(/Assign starting numbers randomly/));
     fireEvent.click(u.getByRole('button', { name: 'Generate pairings' }));
 
@@ -63,27 +60,18 @@ describe('round-robin generation dialogs', () => {
     expect(generate).not.toHaveBeenCalled(); // nothing is sent before the number choice
     fireEvent.click(within(choice).getByRole('button', { name: 'Draw randomly and overwrite numbers' }));
 
-    const adjust = await u.openDialog('needs 3 rounds, but 5 are configured');
-    expect(generate).toHaveBeenCalledTimes(1); // the server only reported the needed confirmation; nothing written
-    fireEvent.click(within(adjust).getByRole('button', { name: 'Set 3 rounds and draw' }));
-
-    await waitFor(() => expect(generate).toHaveBeenCalledTimes(2));
-    expect(generate.mock.calls[1][2]).toMatchObject({ source: 'random', roundCount: 3 });
+    await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
+    expect(generate.mock.calls[0][2]).toEqual({ allRounds: false, source: 'random', confirmReplace: false });
+    expect(u.baseElement.querySelectorAll('dialog[open]')).toHaveLength(0);
   });
 
-  it('cancelling either dialog sends no committing request', async () => {
+  it('cancelling the number-source dialog sends nothing', async () => {
     const u = setup();
-    const generate = vi.spyOn(api, 'generate').mockRejectedValue(adjustment);
+    const generate = vi.spyOn(api, 'generate');
     fireEvent.click(u.getByLabelText(/Assign starting numbers randomly/));
     fireEvent.click(u.getByRole('button', { name: 'Generate pairings' }));
     fireEvent.click(within(await u.openDialog('replaces ALL entered numbers')).getByRole('button', { name: 'Cancel' }));
     expect(generate).not.toHaveBeenCalled();
-
-    fireEvent.click(u.getByRole('button', { name: 'Generate pairings' }));
-    fireEvent.click(within(await u.openDialog('replaces ALL entered numbers')).getByRole('button', { name: 'Use entered numbers' }));
-    fireEvent.click(within(await u.openDialog('needs 3 rounds')).getByRole('button', { name: 'Cancel' }));
-    await waitFor(() => expect(generate).toHaveBeenCalledTimes(1));
-    expect(generate.mock.calls[0][2]).toMatchObject({ source: 'entered', roundCount: null });
   });
 
   it('rejects a typed 0 in the table without saving anything', async () => {

@@ -101,7 +101,8 @@ export function TournamentListPage() {
               <tr key={item.id}>
                 <td><Link to={`/t/${item.id}/standings`} className="strong-link">{item.name}</Link></td>
                 <td className="num">{item.playerCount}</td>
-                <td className="num">{item.roundCount}</td>
+                {/* 0 = a pure round robin before its draw: the count is derived at the draw (spec 0003 §2.2). */}
+                <td className="num">{item.roundCount > 0 ? item.roundCount : <span title={t('settings.roundsAuto')}>{t('settings.roundsPending')}</span>}</td>
                 <td>{formatDateTime(item.updatedAt)}</td>
                 <td className="actions">
                   <Link to={`/t/${item.id}/standings`} className="button small">{t('common.open')}</Link>

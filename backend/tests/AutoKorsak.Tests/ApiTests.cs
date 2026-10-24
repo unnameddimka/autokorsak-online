@@ -180,9 +180,8 @@ public class ApiTests : IDisposable
         for (var i = 1; i <= 4; i++)
             await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
 
-        // 7 rounds for 4 players: a terminal round robin needs 3 rounds, so the server asks to adjust (spec 0002 §4).
-        var mismatch = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true, source = "random" }, Json);
-        Assert.Equal("generate.roundCountAdjustment", await ErrorCode(mismatch));
+        // Spec 0003 §2.2: a pure round robin ignores the submitted count and keeps its provisional value until the draw.
+        Assert.Equal(5, created["tournament"]!["numberOfRounds"]!.GetValue<int>());
 
         var staged = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/stages", new { startRound = 4, system = "swiss" }, Json));
         Assert.Equal("swiss", staged["tournament"]!["system"]!.GetValue<string>());
@@ -205,7 +204,7 @@ public class ApiTests : IDisposable
     }
 
     [Fact]
-    public async Task Frozen_round_robin_member_availability_edit_is_refused_and_nothing_changes()
+    public async Task Frozen_round_robin_member_availability_input_is_ignored_and_nothing_changes()
     {
         var client = _factory.Client();
         var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
@@ -215,11 +214,9 @@ public class ApiTests : IDisposable
             await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants", LegacyXmlTests.Player($"Гравець {i}"), Json));
         await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { source = "random" }, Json));
 
-        var response = await client.PutAsJsonAsync($"/api/tournaments/{id}/participants/2",
-            LegacyXmlTests.Player("Гравець 2") with { NotPlayingRounds = [2] }, Json);
-
-        Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
-        Assert.Equal("participant.rosterMemberUnavailable", await ErrorCode(response));
+        // Spec 0003 §2.3: a pure round robin ignores the hidden availability input (was a 409); nothing changes.
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/participants/2",
+            LegacyXmlTests.Player("Гравець 2") with { NotPlayingRounds = [2] }, Json));
         var reloaded = (await Body(await client.GetAsync($"/api/tournaments/{id}")))["tournament"]!.Deserialize<Tournament>(Json)!;
         Assert.Empty(reloaded.FindParticipant(2)!.NotPlayingRounds);
         var all = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true }, Json));
@@ -276,12 +273,9 @@ public class ApiTests : IDisposable
         Assert.Equal("startingNumbers.invalidValue", await ErrorCode(zero));
         Assert.Equal(2, (await Body(await client.GetAsync($"/api/tournaments/{id}")))["roundRobin"]!["numbers"]!["1"]!.GetValue<int>());
 
-        var prompt = await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate", new { allRounds = true, source = "entered" }, Json);
-        Assert.Equal(HttpStatusCode.Conflict, prompt.StatusCode);
-        Assert.Equal("generate.roundCountAdjustment", await ErrorCode(prompt));
-
+        // Spec 0003 §2.2: no round-count prompt; a forged count from an old client is ignored.
         var drawn = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate",
-            new { allRounds = true, source = "entered", roundCount = 3 }, Json));
+            new { allRounds = true, source = "entered", roundCount = 9 }, Json));
         Assert.Equal(3, drawn["tournament"]!["numberOfRounds"]!.GetValue<int>());
         Assert.Equal([2, 1, 3, 4], drawn["tournament"]!["stages"]![0]!["frozenRosterIds"]!.AsArray().Select(x => x!.GetValue<int>()));
 
@@ -328,5 +322,44 @@ public class ApiTests : IDisposable
         Assert.DoesNotContain("legacyXml", text);
         Assert.DoesNotContain("legacySourceXml", text);
         Assert.True(imported["imported"]!.GetValue<bool>());
+    }
+
+    [Fact]
+    public async Task Pure_round_robin_count_is_server_derived_and_both_win_persists()
+    {
+        var client = _factory.Client();
+        var created = await Body(await client.PostAsJsonAsync("/api/tournaments",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin, 9), Json));
+        var id = created["tournament"]!["id"]!.GetValue<string>();
+        for (var i = 1; i <= 3; i++)
+            await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/participants",
+                LegacyXmlTests.Player($"Гравець {i}") with { FirstEligibleRound = 2, NotPlayingRounds = [1] }, Json));
+        var forged = await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/settings",
+            LegacyXmlTests.Settings("Коло", TournamentSystem.RoundRobin, 12), Json));
+        Assert.Equal(5, forged["tournament"]!["numberOfRounds"]!.GetValue<int>()); // provisional, not the forged 12
+        var summary = (await Body(await client.GetAsync("/api/tournaments"))).AsArray().Single(x => x!["id"]!.GetValue<string>() == id)!;
+        Assert.Equal(0, summary["roundCount"]!.GetValue<int>()); // "not known yet" before the draw
+
+        var drawn = await Body(await client.PostAsJsonAsync($"/api/tournaments/{id}/rounds/1/generate",
+            new { allRounds = true, source = "random" }, Json));
+        var t = drawn["tournament"]!.Deserialize<Tournament>(Json)!;
+        Assert.Equal(3, t.NumberOfRounds);
+        Assert.All(t.Participants, p => Assert.Equal(1, p.FirstEligibleRound));
+        Assert.All(t.Participants, p => Assert.Empty(p.NotPlayingRounds));
+
+        var game = t.Rounds[0].Pairings.Single(p => !p.IsBye);
+        await Body(await client.PutAsJsonAsync($"/api/tournaments/{id}/pairings/{game.Id}",
+            new PairingInput(game.BlackId, game.WhiteId, false, game.BoardNumber, false, 0, 0, false, GameResult.BothWin, false, "", false), Json));
+        var reloaded = await Body(await client.GetAsync($"/api/tournaments/{id}"));
+        Assert.Equal("bothWin", reloaded["tournament"]!["rounds"]![0]!["pairings"]!.AsArray()
+            .Single(p => p!["id"]!.GetValue<int>() == game.Id)!["result"]!.GetValue<string>());
+        summary = (await Body(await client.GetAsync("/api/tournaments"))).AsArray().Single(x => x!["id"]!.GetValue<string>() == id)!;
+        Assert.Equal(3, summary["roundCount"]!.GetValue<int>());
+
+        var standings = await Body(await client.GetAsync($"/api/tournaments/{id}/standings"));
+        var wins = standings["rows"]!.AsArray()
+            .Where(r => r!["participantId"]!.GetValue<int>() == game.BlackId || r!["participantId"]!.GetValue<int>() == game.WhiteId)
+            .Select(r => r!["values"]![CriterionKeys.Wins]!.GetValue<decimal>()).ToList();
+        Assert.Equal([1m, 1m], wins);
     }
 }

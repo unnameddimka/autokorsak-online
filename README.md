@@ -52,7 +52,7 @@ Data is stored in SQLite inside the `autokorsak-data` Docker volume and survives
    6 wins, SOS 21, SODOS 21, SOSOS 111.
 4. Try the journeys:
    - edit a player (rating, comment) or a pairing result, and watch the standings update;
-   - switch rounds;
+   - switch rounds (the current-round control is on the Standings page);
    - toggle **Include current round in calculations**;
    - switch the interface language (open forms keep their edits);
    - **Save as XML**, then import the downloaded file again.

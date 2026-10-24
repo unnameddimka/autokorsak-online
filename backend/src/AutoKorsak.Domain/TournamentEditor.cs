@@ -102,18 +102,25 @@ public static partial class TournamentEditor
             throw new DomainException("validation.tooLong", Args(("field", "description"), ("max", MaxTextLength)));
         if (input.System is null && t.LegacyKind is null) throw new DomainException("settings.systemRequired");
         if (input.BoardSize is < 5 or > 25) throw new DomainException("settings.invalidBoardSize");
-        if (input.NumberOfRounds is < 1 or > MaxRounds)
-            throw new DomainException("settings.invalidRoundCount", Args(("max", MaxRounds)));
 
-        var lastPairedRound = t.Rounds.Where(r => r.Pairings.Count > 0).Select(r => r.Number).DefaultIfEmpty(0).Max();
-        if (input.NumberOfRounds < lastPairedRound)
-            throw new DomainException("settings.roundsHavePairings", Args(("round", lastPairedRound)));
-        var lastStageStart = t.Stages.Max(s => s.StartRound);
-        if (input.NumberOfRounds < lastStageStart)
-            throw new DomainException("settings.roundsHaveStages", Args(("round", lastStageStart)));
-        var lastJoinRound = t.Participants.Select(p => p.FirstEligibleRound).DefaultIfEmpty(1).Max();
-        if (input.NumberOfRounds < lastJoinRound)
-            throw new DomainException("settings.participantsJoinLater", Args(("round", lastJoinRound)));
+        // Spec 0003 §2.2: a pure round robin derives its round count at the draw, so the submitted value is ignored
+        // (the stored, possibly provisional, count stays). Other systems keep the editable count.
+        var pureRoundRobin = input.System == TournamentSystem.RoundRobin && t.Stages.Count == 1;
+        var numberOfRounds = pureRoundRobin ? t.NumberOfRounds : input.NumberOfRounds;
+        if (!pureRoundRobin)
+        {
+            if (numberOfRounds is < 1 or > MaxRounds)
+                throw new DomainException("settings.invalidRoundCount", Args(("max", MaxRounds)));
+            var lastPairedRound = t.Rounds.Where(r => r.Pairings.Count > 0).Select(r => r.Number).DefaultIfEmpty(0).Max();
+            if (numberOfRounds < lastPairedRound)
+                throw new DomainException("settings.roundsHavePairings", Args(("round", lastPairedRound)));
+            var lastStageStart = t.Stages.Max(s => s.StartRound);
+            if (numberOfRounds < lastStageStart)
+                throw new DomainException("settings.roundsHaveStages", Args(("round", lastStageStart)));
+            var lastJoinRound = t.Participants.Select(p => p.FirstEligibleRound).DefaultIfEmpty(1).Max();
+            if (numberOfRounds < lastJoinRound)
+                throw new DomainException("settings.participantsJoinLater", Args(("round", lastJoinRound)));
+        }
 
         // Spec 0001 §2.1: Settings may change the system only while that cannot rewrite a historical stage.
         var systemChanged = input.System != t.System;
@@ -125,7 +132,7 @@ public static partial class TournamentEditor
         if (systemChanged) t.Stages[0].System = input.System;
         t.BoardSize = input.BoardSize;
         t.FirstMoveColor = input.FirstMoveColor;
-        t.NumberOfRounds = input.NumberOfRounds;
+        t.NumberOfRounds = numberOfRounds;
         t.HandicapUsed = input.HandicapUsed;
         t.AllowDraws = input.AllowDraws;
         t.RankFromRating = input.RankFromRating;
@@ -141,6 +148,7 @@ public static partial class TournamentEditor
         if (input.PairingConstraints is not null) t.PairingConstraints = input.PairingConstraints;
         if (input.Calculation is not null) t.Calculation = input.Calculation;
 
+        if (pureRoundRobin) return; // unchanged count; hidden absences are kept as stored (spec 0003 §2.3)
         t.Rounds.RemoveAll(r => r.Number > t.NumberOfRounds);
         foreach (var p in t.Participants) p.NotPlayingRounds.RemoveAll(r => r > t.NumberOfRounds);
         t.CurrentRound = Math.Clamp(t.CurrentRound, 1, t.NumberOfRounds);
@@ -200,24 +208,36 @@ public static partial class TournamentEditor
         if (input.Rating is < -1000 or > 4000) throw new DomainException("participant.invalidRating");
         if (input.RankShift is < -30 or > 30) throw new DomainException("participant.invalidRankShift");
 
-        var notPlaying = (input.NotPlayingRounds ?? []).Distinct().Order().ToList();
-        if (notPlaying.Any(r => r < 1 || r > t.NumberOfRounds))
-            throw new DomainException("round.outOfRange", Args(("max", t.NumberOfRounds)));
-
+        // Spec 0003 §2.3: a pure round robin has no joining round or absences. New entrants join at round 1 with no
+        // absences; for existing ones the stored values are kept untouched (they have no effect) and input is ignored.
+        var pureRoundRobin = t.IsPureRoundRobin();
+        List<int> notPlaying;
         int joinRound;
-        if (input.FirstEligibleRound is { } requested) joinRound = requested;
-        else if (!isNew) joinRound = p.FirstEligibleRound;
-        else joinRound = DefaultJoinRound(t, input.Preliminary)
-            // No adjusted default: validate the unadjusted round so the specific reason (e.g. a frozen round robin) is reported.
-            ?? UnadjustedJoinRound(t)
-            ?? throw new DomainException("participant.joinRoundRequired", Args(("max", t.NumberOfRounds)));
-        ValidateParticipation(t, p, isNew, joinRound, input.Preliminary);
+        if (pureRoundRobin)
+        {
+            notPlaying = isNew ? [] : p.NotPlayingRounds;
+            joinRound = isNew ? 1 : p.FirstEligibleRound;
+        }
+        else
+        {
+            notPlaying = (input.NotPlayingRounds ?? []).Distinct().Order().ToList();
+            if (notPlaying.Any(r => r < 1 || r > t.NumberOfRounds))
+                throw new DomainException("round.outOfRange", Args(("max", t.NumberOfRounds)));
+            if (input.FirstEligibleRound is { } requested) joinRound = requested;
+            else if (!isNew) joinRound = p.FirstEligibleRound;
+            else joinRound = DefaultJoinRound(t, input.Preliminary)
+                // No adjusted default: validate the unadjusted round so the specific reason (e.g. a frozen round robin) is reported.
+                ?? UnadjustedJoinRound(t)
+                ?? throw new DomainException("participant.joinRoundRequired", Args(("max", t.NumberOfRounds)));
+        }
+        var effectiveJoinRound = pureRoundRobin ? 1 : joinRound;
+        ValidateParticipation(t, p, isNew, effectiveJoinRound, input.Preliminary);
         int? draftNumber = p.StartingNumber;
         if (input.StartingNumber is { } requestedNumber)
         {
             draftNumber = requestedNumber == 0 ? null : requestedNumber;
             if (draftNumber != p.StartingNumber)
-                CheckDraftEditable(t, string.Join(' ', input.LocalSurname, input.LocalFirstName).Trim(), input.Preliminary, joinRound, draftNumber);
+                CheckDraftEditable(t, string.Join(' ', input.LocalSurname, input.LocalFirstName).Trim(), input.Preliminary, effectiveJoinRound, draftNumber);
         }
 
         if (!isNew)
@@ -284,7 +304,7 @@ public static partial class TournamentEditor
         {
             try
             {
-                ValidateParticipation(t, p, isNew: false, p.FirstEligibleRound, preliminary: false);
+                ValidateParticipation(t, p, isNew: false, t.EffectiveJoinRound(p), preliminary: false);
                 p.Preliminary = false;
                 finalized.Add(p.Id);
             }
@@ -310,7 +330,7 @@ public static partial class TournamentEditor
             var p = t.FindParticipant(e.ParticipantId) ?? throw new NotFoundException("participant.notFound");
             var number = e.Number; // null clears; 0 is not a valid number here (only the player card uses 0 as "clear")
             if (number == p.StartingNumber) continue;
-            CheckDraftEditable(t, p.DisplayName, p.Preliminary, p.FirstEligibleRound, number);
+            CheckDraftEditable(t, p.DisplayName, p.Preliminary, t.EffectiveJoinRound(p), number);
             resolved.Add((p, number));
         }
         foreach (var (p, number) in resolved) p.StartingNumber = number;
@@ -471,6 +491,7 @@ public static partial class TournamentEditor
         {
             (GameResult.BlackWins, GameResult.WhiteWins) or (GameResult.WhiteWins, GameResult.BlackWins) => true,
             (GameResult.BothLose, GameResult.BothLose) or (GameResult.Draw, GameResult.Draw) => true,
+            (GameResult.BothWin, GameResult.BothWin) => true,
             _ => false,
         };
     }
@@ -491,13 +512,13 @@ public static partial class TournamentEditor
             if (round.Pairings.Any(x => x != pairing && x.Involves(id)))
                 throw new DomainException("pairing.playerAlreadyPaired", Args(("name", player.DisplayName), ("round", round.Number)));
             if (previous.Contains(id)) continue; // already in this pairing: legacy data is not re-validated
-            if (!player.HasJoinedBy(round.Number))
+            if (!t.HasJoined(player, round.Number))
                 throw new DomainException("pairing.playerNotJoined", Args(("name", player.DisplayName), ("round", player.FirstEligibleRound)));
             if (stage.FrozenRosterIds is { } roster && !roster.Contains(id))
                 throw new DomainException("pairing.notInRoundRobinRoster", Args(("name", player.DisplayName)));
             if (player.Preliminary)
                 throw new DomainException("pairing.playerPreliminary", Args(("name", player.DisplayName)));
-            if (!player.PlaysInRound(round.Number))
+            if (!t.Plays(player, round.Number))
                 throw new DomainException("pairing.playerNotAvailable", Args(("name", player.DisplayName), ("round", round.Number)));
         }
 

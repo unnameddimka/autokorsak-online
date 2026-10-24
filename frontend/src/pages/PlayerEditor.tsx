@@ -1,9 +1,12 @@
-import { useEffect, useState, type ChangeEvent } from 'react';
+import { useEffect, useState, type ChangeEvent, type ReactNode } from 'react';
 import { api, ApiError } from '../api/client';
 import type { CatalogEntry, Participant, ParticipantInput } from '../api/types';
-import { Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
+import { AppOnlyBadge, Checkbox, Field, Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, isLockedRosterRound, parseStartingNumber, RANK_OPTIONS, roman } from '../format';
+import {
+  errorMessage, formatRank, isLockedRosterRound, isPureRoundRobin, parseRating, parseStartingNumber, RANK_OPTIONS, RATING_MAX, RATING_MIN, roman,
+} from '../format';
+import { transliterate } from '../transliteration';
 import { useTournament } from './TournamentLayout';
 
 const EMPTY: ParticipantInput = {
@@ -38,7 +41,14 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
   const rr = view.roundRobin;
   const initialNumber = participant ? rr?.numbers[String(participant.id)] ?? null : null;
   const [numberText, setNumberText] = useState(initialNumber?.toString() ?? '');
-  const numberEditable = !!rr && !rr.frozen && !form.preliminary && (form.firstEligibleRound ?? 1) <= rr.startRound;
+  // Spec 0003 §2.3: a pure round robin has no joining round or per-round availability (the server ignores them).
+  const pureRoundRobin = isPureRoundRobin(tournament);
+  const joinRound = pureRoundRobin ? 1 : form.firstEligibleRound ?? 1;
+  const numberEditable = !!rr && !rr.frozen && !form.preliminary && joinRound <= rr.startRound;
+  // Spec 0003 §5.1: the rating is edited as text and converted on save, so an emptied field stays empty while typing.
+  const [ratingText, setRatingText] = useState(() => String(participant?.rating ?? EMPTY.rating));
+  const [ratingInvalid, setRatingInvalid] = useState(false);
+  const [transliterationNote, setTransliterationNote] = useState<string | null>(null);
 
   const set = <K extends keyof ParticipantInput>(key: K, value: ParticipantInput[K]) => setForm((f) => ({ ...f, [key]: value }));
   const text = (key: 'localSurname' | 'localFirstName' | 'surname' | 'firstName' | 'grade' | 'country' | 'club' | 'nationality' | 'team' | 'coach' | 'comment') => ({
@@ -57,7 +67,13 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
     }
     // Card payload: null = unchanged, 0 = clear (internal sentinel for an emptied field), n = set.
     const startingNumber = !numberChanged ? null : parsed === null ? 0 : (parsed as number);
-    const input = { ...form, startingNumber };
+    const rating = parseRating(ratingText);
+    setRatingInvalid(rating === 'invalid');
+    if (rating === 'invalid') {
+      setError(new ApiError('participant.invalidRating', { min: RATING_MIN, max: RATING_MAX }, 400));
+      return;
+    }
+    const input = { ...form, rating, startingNumber };
     setSaving(true);
     setError(null);
     try {
@@ -100,12 +116,54 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
       rating: entry.rating, rank: entry.rank, grade: entry.grade, country: entry.country, club: entry.club,
       nationality: entry.nationality, team: entry.team, coach: entry.coach, catalogEntryId: entry.id,
     }));
+    setRatingText(String(entry.rating));
+    setRatingInvalid(false);
+  }
+
+  /**
+   * Spec 0003 §4: fills the English name from the Ukrainian one on an explicit click only. A destination is written only
+   * when its source has text, and overwriting any existing English value needs one confirmation for both fields.
+   */
+  async function transliterateNames() {
+    const sources = { surname: form.localSurname, firstName: form.localFirstName } as const;
+    const next: Partial<Record<'surname' | 'firstName', string>> = {};
+    const unsupported = new Set<string>();
+    for (const key of ['surname', 'firstName'] as const) {
+      if (sources[key].trim() === '') continue;
+      const result = transliterate(sources[key]);
+      next[key] = result.text;
+      result.unsupported.forEach((c) => unsupported.add(c));
+    }
+    if (next.surname === undefined && next.firstName === undefined) {
+      setTransliterationNote(t('player.transliterateEmpty'));
+      return;
+    }
+    const overwritten = (['surname', 'firstName'] as const).filter((key) => next[key] !== undefined && form[key].trim() !== '' && form[key] !== next[key]);
+    if (overwritten.length > 0) {
+      const ok = await confirm({
+        title: t('player.transliterateTitle'),
+        message: t('player.transliterateMessage', {
+          current: [form.surname, form.firstName].filter(Boolean).join(' '),
+          next: [next.surname ?? form.surname, next.firstName ?? form.firstName].filter(Boolean).join(' '),
+        }),
+        confirmLabel: t('player.transliterateConfirm'),
+      });
+      if (!ok) return;
+    }
+    setForm((f) => ({ ...f, ...next }));
+    setTransliterationNote(unsupported.size > 0 ? t('player.transliterateUnsupported', { chars: [...unsupported].join(' ') }) : null);
   }
 
   const toggleRound = (round: number, plays: boolean) =>
     set('notPlayingRounds', plays ? form.notPlayingRounds.filter((r) => r !== round) : [...form.notPlayingRounds, round].sort((a, b) => a - b));
 
-  const appOnly = <span className="app-only" title={t('player.appOnlyHint')}>{t('player.appOnly')}</span>;
+  // The badge sits next to the field, outside its <label>: a button inside the label would take the label from the input.
+  const appOnly = (label: string, input: ReactNode) => (
+    <div className="field-with-aside">
+      <Field label={label}>{input}</Field>
+      <AppOnlyBadge />
+    </div>
+  );
   const rankOptions = form.rank && !RANK_OPTIONS.includes(form.rank) ? [form.rank, ...RANK_OPTIONS] : RANK_OPTIONS;
 
   return (
@@ -133,11 +191,16 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
       <form className="form-grid" onSubmit={(e) => { e.preventDefault(); save(); }}>
         <Field label={t('field.localSurname')} hint={t('player.localSurnameHint')}><input {...text('localSurname')} autoFocus={!isNew} /></Field>
         <Field label={t('field.localFirstName')}><input {...text('localFirstName')} /></Field>
+        <div className="transliterate-row">
+          <button type="button" onClick={() => void transliterateNames()}>{t('player.transliterate')}</button>
+          <span className="field-hint">{transliterationNote ?? t('player.transliterateHint')}</span>
+        </div>
         <Field label={t('field.surname')}><input {...text('surname')} lang="en" /></Field>
         <Field label={t('field.firstName')}><input {...text('firstName')} lang="en" /></Field>
 
-        <Field label={t('field.rating')}>
-          <input type="number" value={form.rating} onChange={(e) => set('rating', Number(e.target.value) || 0)} />
+        <Field label={t('field.rating')} hint={ratingInvalid ? t('error.participant.invalidRating') : undefined}>
+          <input inputMode="numeric" value={ratingText} aria-invalid={ratingInvalid || undefined}
+            onChange={(e) => { setRatingText(e.target.value); setRatingInvalid(false); }} />
         </Field>
         <Field label={t('field.rank')} hint={tournament.rankFromRating ? t('player.rankFromRatingPending') : undefined}>
           <select value={form.rank} onChange={(e) => set('rank', e.target.value)}>
@@ -145,16 +208,15 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
             {rankOptions.map((r) => <option key={r} value={r}>{formatRank(r, t)}</option>)}
           </select>
         </Field>
-        <Field label={<>{t('field.rankShift')} {appOnly}</>}>
-          <input type="number" min={-30} max={30} value={form.rankShift} onChange={(e) => set('rankShift', Number(e.target.value) || 0)} />
-        </Field>
+        {appOnly(t('field.rankShift'),
+          <input type="number" min={-30} max={30} value={form.rankShift} onChange={(e) => set('rankShift', Number(e.target.value) || 0)} />)}
         <Field label={t('field.grade')}><input {...text('grade')} /></Field>
 
-        <Field label={<>{t('field.country')} {appOnly}</>}><input {...text('country')} /></Field>
-        <Field label={<>{t('field.club')} {appOnly}</>}><input {...text('club')} /></Field>
-        <Field label={<>{t('field.nationality')} {appOnly}</>}><input {...text('nationality')} /></Field>
-        <Field label={<>{t('field.team')} {appOnly}</>}><input {...text('team')} /></Field>
-        <Field label={<>{t('field.coach')} {appOnly}</>}><input {...text('coach')} /></Field>
+        {appOnly(t('field.country'), <input {...text('country')} />)}
+        {appOnly(t('field.club'), <input {...text('club')} />)}
+        {appOnly(t('field.nationality'), <input {...text('nationality')} />)}
+        {appOnly(t('field.team'), <input {...text('team')} />)}
+        {appOnly(t('field.coach'), <input {...text('coach')} />)}
 
         <fieldset className="field field-wide">
           <legend className="field-label">{t('field.preliminary')}</legend>
@@ -174,29 +236,33 @@ export function PlayerEditor({ participant, onClose }: { participant: Participan
             <input inputMode="numeric" value={numberText} disabled={!numberEditable} onChange={(e) => setNumberText(e.target.value)} />
           </Field>
         )}
-        <Field label={t('field.firstEligibleRound')} hint={t('player.joinRoundHint')}>
-          <select value={form.firstEligibleRound ?? ''}
-            onChange={(e) => set('firstEligibleRound', e.target.value === '' ? null : Number(e.target.value))}>
-            {form.firstEligibleRound === null && <option value="">{t('player.joinRoundChoose')}</option>}
-            {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => (
-              <option key={r} value={r}>{t('round.label', { roman: roman(r), n: r })}</option>
-            ))}
-          </select>
-        </Field>
+        {!pureRoundRobin && (
+          <>
+            <Field label={t('field.firstEligibleRound')} hint={t('player.joinRoundHint')}>
+              <select value={form.firstEligibleRound ?? ''}
+                onChange={(e) => set('firstEligibleRound', e.target.value === '' ? null : Number(e.target.value))}>
+                {form.firstEligibleRound === null && <option value="">{t('player.joinRoundChoose')}</option>}
+                {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => (
+                  <option key={r} value={r}>{t('round.label', { roman: roman(r), n: r })}</option>
+                ))}
+              </select>
+            </Field>
 
-        <fieldset className="field field-wide">
-          <legend className="field-label">{t('field.availability')}</legend>
-          {!isNew && tournament.stages.some((s) => s.frozenRosterIds?.includes(participant.id)) && (
-            <span className="field-hint">{t('player.rosterRoundsLocked')}</span>
-          )}
-          <div className="inline-options">
-            {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((round) => (
-              <Checkbox key={round} label={roman(round)}
-                disabled={round < (form.firstEligibleRound ?? 1) || (!isNew && isLockedRosterRound(tournament, participant.id, round))}
-                checked={round >= (form.firstEligibleRound ?? 1) && !form.notPlayingRounds.includes(round)} onChange={(v) => toggleRound(round, v)} />
-            ))}
-          </div>
-        </fieldset>
+            <fieldset className="field field-wide">
+              <legend className="field-label">{t('field.availability')}</legend>
+              {!isNew && tournament.stages.some((s) => s.frozenRosterIds?.includes(participant.id)) && (
+                <span className="field-hint">{t('player.rosterRoundsLocked')}</span>
+              )}
+              <div className="inline-options">
+                {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((round) => (
+                  <Checkbox key={round} label={roman(round)}
+                    disabled={round < (form.firstEligibleRound ?? 1) || (!isNew && isLockedRosterRound(tournament, participant.id, round))}
+                    checked={round >= (form.firstEligibleRound ?? 1) && !form.notPlayingRounds.includes(round)} onChange={(v) => toggleRound(round, v)} />
+                ))}
+              </div>
+            </fieldset>
+          </>
+        )}
 
         <Field label={t('field.comment')} wide><input {...text('comment')} /></Field>
         <button type="submit" hidden />
@@ -232,7 +298,7 @@ function CatalogSearch({ onPick }: { onPick: (entry: CatalogEntry) => void }) {
                   <button type="button" className="link-button" onClick={() => { onPick(entry); setQuery(''); }}>
                     {entry.displayName}
                   </button>
-                  <span className="muted"> {entry.rank && formatRank(entry.rank, t)} {entry.rating || ''} {entry.club}</span>
+                  <span className="muted"> {entry.rank && formatRank(entry.rank, t)} {entry.rating} {entry.club}</span>
                 </li>
               ))}
             </ul>

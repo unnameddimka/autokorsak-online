@@ -118,10 +118,28 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--accent); width
 .checkbox.grow { flex: 1; }
 .inline-options { display: flex; flex-wrap: wrap; gap: 0.5rem 1rem; align-items: center; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem 1.2rem; }
+.field-with-aside { position: relative; min-width: 0; }
+.field-with-aside > .app-only-wrap { position: absolute; top: -0.1rem; right: 0; }
+.app-only-wrap { position: relative; display: inline-block; }
+.field-with-aside .app-only-popover { left: auto; right: 0; }
 .app-only {
-  font-weight: 400; font-size: 0.72rem; color: var(--muted); border: 1px dashed #c9c0ae;
-  border-radius: 4px; padding: 0 0.3rem; margin-left: 0.3rem;
+  font-weight: 400; font-size: 0.72rem; color: var(--muted); border: 1px dashed #c9c0ae; background: none;
+  border-radius: 4px; padding: 0 0.3rem; margin-left: 0.3rem; cursor: help; line-height: 1.4;
 }
+.app-only-popover {
+  position: absolute; left: 0; top: calc(100% + 0.3rem); z-index: 5; width: min(22rem, 70vw);
+  padding: 0.6rem 0.75rem; background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: var(--shadow); font-weight: 400; font-size: 0.82rem; color: var(--text); line-height: 1.4;
+}
+.readonly-value { padding: 0.45rem 0; color: var(--text); }
+.pairing-primary {
+  grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem 1.2rem;
+  padding: 0.9rem 1rem; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2);
+}
+.pairing-primary .result-field select { font-size: 1.05rem; font-weight: 600; }
+.pairing-secondary { grid-column: 1 / -1; border: 0; padding: 0; margin: 0; display: contents; }
+.section-label { grid-column: 1 / -1; margin: 0.3rem 0 -0.3rem; font-size: 0.8rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.transliterate-row { grid-column: 1 / -1; display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; }
 
 /* ---------- tabs ---------- */
 

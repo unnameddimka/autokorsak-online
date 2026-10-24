@@ -42,7 +42,8 @@ public sealed record PreparationResult(
     IReadOnlyList<string> Notices);
 
 /// <summary>
-/// Derives standings from pairings and results. Verified rules: win = 1 point, a bye = one win and one point
+/// Derives standings from pairings and results. Verified rules: win = 1 point, "both win" = a win for each player
+/// (spec 0003 §7.2), a bye = one win and one point
 /// (spec 0001 §4), SOS = sum of opponents' points, SODOS = sum of points of defeated opponents, SOSOS = sum of
 /// opponents' SOS. Unsupported situations are reported as notices, never silently "corrected".
 /// </summary>
@@ -129,12 +130,12 @@ public static class StandingsCalculator
         foreach (var participant in t.Participants)
             foreach (var r in displayed.Where(r => !tally.Cells[participant.Id].ContainsKey(r)))
             {
-                if (!participant.HasJoinedBy(r))
+                if (!t.HasJoined(participant, r))
                 {
                     tally.Cells[participant.Id][r] = new RoundCell(r, CellKind.NotJoined);
                     continue;
                 }
-                var notPlaying = !participant.PlaysInRound(r);
+                var notPlaying = !t.Plays(participant, r);
                 tally.Cells[participant.Id][r] = new RoundCell(r, notPlaying ? CellKind.NotPlaying : CellKind.None);
                 if (counted.Contains(r) && !participant.Preliminary && (notPlaying || playedRounds.Contains(r)))
                     tally.Notices.Add(NoticeSkippedRounds);
@@ -253,6 +254,7 @@ public static class StandingsCalculator
         GameResult.BlackWins => (CellOutcome.Win, CellOutcome.Loss),
         GameResult.WhiteWins => (CellOutcome.Loss, CellOutcome.Win),
         GameResult.BothLose => (CellOutcome.BothLose, CellOutcome.BothLose),
+        GameResult.BothWin => (CellOutcome.Win, CellOutcome.Win), // spec 0003 §7.2: one point and one win each
         GameResult.Draw => (CellOutcome.Draw, CellOutcome.Draw),
         GameResult.Unknown => (CellOutcome.Unknown, CellOutcome.Unknown),
         _ => (CellOutcome.Unset, CellOutcome.Unset),

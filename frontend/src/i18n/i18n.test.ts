@@ -50,8 +50,10 @@ describe('localization', () => {
   });
 
   it('components contain no hard-coded Cyrillic interface text', () => {
+    // The transliteration table (spec 0003 §4) and its tests hold Ukrainian letters as data, not as interface text.
+    const transliterationData = /[\\/]transliteration(\.test)?\.ts$/;
     const offenders = filesUnder(srcDir)
-      .filter((f) => /\.tsx?$/.test(f) && !f.includes(`${join('i18n', '')}`))
+      .filter((f) => /\.tsx?$/.test(f) && !f.includes(`${join('i18n', '')}`) && !transliterationData.test(f))
       .filter((f) => /[Ѐ-ӿ]/.test(readFileSync(f, 'utf8')));
     expect(offenders).toEqual([]);
   });

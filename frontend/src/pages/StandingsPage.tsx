@@ -5,7 +5,7 @@ import { Checkbox, Notice } from '../components/common';
 import { useI18n } from '../i18n';
 import type { MessageKey } from '../i18n/en';
 import { formatRank, roman, systemLabel } from '../format';
-import { useTournament } from './TournamentLayout';
+import { RoundNavigator, useTournament } from './TournamentLayout';
 import { PlayerEditor } from './PlayerEditor';
 
 type AttributeColumn = 'country' | 'club' | 'team' | 'coach' | 'grade' | 'rank' | 'rating' | 'group';
@@ -26,7 +26,17 @@ function readPreference(id: string): boolean {
   try { return localStorage.getItem(PREP_KEY(id)) === '1'; } catch { return false; }
 }
 
+/** Standings with the current-round control, which lives on this page only (spec 0003 §3). */
 export function StandingsPage() {
+  return (
+    <>
+      <RoundNavigator />
+      <StandingsView />
+    </>
+  );
+}
+
+function StandingsView() {
   const { tournament, standings } = useTournament();
   const { t, tk, formatNumber } = useI18n();
   const [editing, setEditing] = useState<Participant | null>(null);
@@ -66,7 +76,7 @@ export function StandingsPage() {
   const attributeValue = (p: Participant, column: AttributeColumn): string => {
     switch (column) {
       case 'rank': return p.rank ? formatRank(p.rank, t) : '';
-      case 'rating': return p.rating ? String(p.rating) : '';
+      case 'rating': return String(p.rating); // 0 is a real rating (spec 0003 §5.2)
       case 'group': return tournament.system === 'mcMahon' && p.startScore ? String(p.startScore) : '';
       default: return p[column];
     }

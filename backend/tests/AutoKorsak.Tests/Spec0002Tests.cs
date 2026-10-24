@@ -19,7 +19,8 @@ public class Spec0002Tests
     private static Tournament RoundRobin(int players, int? rounds = null)
     {
         var cycle = players % 2 == 0 ? players - 1 : players;
-        var t = TournamentEditor.Create(Settings("RR", TournamentSystem.RoundRobin, rounds ?? cycle), DateTimeOffset.UnixEpoch);
+        var t = TournamentEditor.Create(Settings("RR", TournamentSystem.RoundRobin), DateTimeOffset.UnixEpoch);
+        t.NumberOfRounds = rounds ?? cycle; // spec 0003: Settings no longer edits an RR count; a stored (pre-0003) value
         for (var i = 1; i <= players; i++) TournamentEditor.AddParticipant(t, Player($"P{i}", rating: 1000 + i * 10));
         return t;
     }
@@ -28,8 +29,8 @@ public class Spec0002Tests
         TournamentEditor.SetStartingNumbers(t, entries.Select(e => new StartingNumberEntry(e.Id, e.Number)).ToList());
 
     private static GenerationResult Generate(Tournament t, int round = 1, bool all = false, StartingNumberSource source = StartingNumberSource.Entered,
-        int? roundCount = null, bool confirm = false, IRandomSource? random = null) =>
-        PairingSchedule.GenerateRoundRobin(t, round, all, source, roundCount, confirm, random ?? new FixedRandom(0));
+        bool confirm = false, IRandomSource? random = null) =>
+        PairingSchedule.GenerateRoundRobin(t, round, all, source, confirm, random ?? new FixedRandom(0));
 
     private static string Json(Tournament t) => JsonSerializer.Serialize(t, Storage.Json);
 
@@ -167,7 +168,7 @@ public class Spec0002Tests
 
         TournamentEditor.UpdateParticipant(t, p.Id, Player("Later")); // now eligible; draft kept, not renumbered
         Assert.Equal(2, p.StartingNumber);
-        var ex = Assert.Throws<DomainException>(() => Generate(t, roundCount: 3));
+        var ex = Assert.Throws<DomainException>(() => Generate(t));
         Assert.Equal("generate.startingNumbersInvalid", ex.Code);
     }
 
@@ -188,24 +189,14 @@ public class Spec0002Tests
         Assert.Null(undrawn.Stages[0].FrozenRosterIds);
     }
 
-    // 6. Round-count adjustment
+    // 6. Round-count adjustment (spec 0003 §2.2 removed the confirmation)
     [Fact]
-    public void Eight_players_and_five_rounds_prompt_for_seven_and_confirm_resizes_and_draws_atomically()
+    public void Eight_players_and_five_rounds_resize_to_seven_without_a_prompt()
     {
         var t = RoundRobin(8, rounds: 5);
         Number(t, Enumerable.Range(1, 8).Select(i => (i, (int?)i)).ToArray());
-        var before = Json(t);
 
-        var prompt = Assert.Throws<DomainException>(() => Generate(t, all: true));
-        Assert.Equal("generate.roundCountAdjustment", prompt.Code);
-        Assert.True(prompt.IsConflict);
-        Assert.Equal(8, prompt.Args["players"]);
-        Assert.Equal(7, prompt.Args["required"]);
-        Assert.Equal(5, prompt.Args["current"]);
-        Assert.Equal(before, Json(t)); // "cancel" = no further request
-        Assert.Equal("generate.roundCountAdjustment", Assert.Throws<DomainException>(() => Generate(t, all: true, roundCount: 6)).Code);
-
-        var result = Generate(t, all: true, roundCount: 7);
+        var result = Generate(t, all: true);
         Assert.Equal(7, t.NumberOfRounds);
         Assert.Equal(7, result.NumberOfRounds);
         Assert.Equal(7, t.Rounds.Count(r => r.Pairings.Count == 4));
@@ -213,29 +204,26 @@ public class Spec0002Tests
 
     // 7. Safe shrink
     [Fact]
-    public void Shrinking_refuses_when_trimmed_rounds_hold_anything_and_works_when_safe()
+    public void Shrinking_refuses_when_trimmed_rounds_hold_pairings_and_works_when_safe()
     {
         var t = RoundRobin(8, rounds: 10);
         Number(t, Enumerable.Range(1, 8).Select(i => (i, (int?)i)).ToArray());
-        t.Participants[0].NotPlayingRounds = [9];
-        var before = Json(t);
-        var blocked = Assert.Throws<DomainException>(() => Generate(t, all: true, roundCount: 7));
-        Assert.Equal("generate.roundCountShrinkBlocked", blocked.Code);
-        Assert.Equal("9", blocked.Args["rounds"]);
-        Assert.Equal(before, Json(t));
-
-        t.Participants[0].NotPlayingRounds = [];
         TournamentEditor.AddPairing(t, 10, Pair(1, 2));
-        Assert.Equal("generate.roundCountShrinkBlocked", Assert.Throws<DomainException>(() => Generate(t, all: true, roundCount: 7)).Code);
+        var before = Json(t);
+        var blocked = Assert.Throws<DomainException>(() => Generate(t, all: true));
+        Assert.Equal("generate.roundCountShrinkBlocked", blocked.Code);
+        Assert.Equal("10", blocked.Args["rounds"]);
+        Assert.Equal(before, Json(t));
         TournamentEditor.DeletePairing(t, t.Rounds.Single(r => r.Number == 10).Pairings[0].Id, false);
 
-        var later = TournamentEditor.AddParticipant(t, Player("Later", preliminary: true) with { FirstEligibleRound = 8 });
-        Assert.Equal("generate.roundCountShrinkBlocked", Assert.Throws<DomainException>(() => Generate(t, all: true, roundCount: 7)).Code);
-        TournamentEditor.DeleteParticipant(t, later.Id);
-
-        Generate(t, all: true, roundCount: 7);
+        // Spec 0003 §2.3: hidden absences and joining rounds of a pure round robin no longer block (kept as stored).
+        t.Participants[0].NotPlayingRounds = [9];
+        t.Participants[1].FirstEligibleRound = 8;
+        Generate(t, all: true);
         Assert.Equal(7, t.NumberOfRounds);
         Assert.DoesNotContain(t.Rounds, r => r.Number > 7);
+        Assert.Equal([9], t.Participants[0].NotPlayingRounds);
+        Assert.Equal(8, t.Participants[1].FirstEligibleRound);
     }
 
     // 8. Odd roster and RR prefix
@@ -244,7 +232,7 @@ public class Spec0002Tests
     {
         var odd = RoundRobin(5, rounds: 4);
         Number(odd, Enumerable.Range(1, 5).Select(i => (i, (int?)i)).ToArray());
-        Assert.Equal(5, Assert.Throws<DomainException>(() => Generate(odd)).Args["required"]);
+        Assert.Equal(5, Generate(odd).NumberOfRounds);
 
         var prefix = RoundRobin(4, rounds: 7);
         Number(prefix, (1, 1), (2, 2), (3, 3), (4, 4));
@@ -260,17 +248,15 @@ public class Spec0002Tests
     {
         var t = RoundRobin(4, rounds: 5);
         Number(t, (1, 4), (2, 3), (3, 2), (4, 1));
-        t.Participants[2].NotPlayingRounds = [2]; // fails late, during planning
+        var bye = TournamentEditor.AddPairing(t, 2, Pair(3, 0) with { WhiteId = null, IsBye = true }); // fails late, during planning
         var before = Json(t);
 
-        Assert.Equal("generate.roundCountAdjustment",
+        Assert.Equal("generate.playedPairingConflicts",
             Assert.Throws<DomainException>(() => Generate(t, all: true, source: StartingNumberSource.Random)).Code);
-        Assert.Equal("generate.playerUnavailable",
-            Assert.Throws<DomainException>(() => Generate(t, all: true, source: StartingNumberSource.Random, roundCount: 3)).Code);
         Assert.Equal(before, Json(t)); // numbers, round count, roster and pairings unchanged
 
-        t.Participants[2].NotPlayingRounds = [];
-        Generate(t, all: true, source: StartingNumberSource.Random, roundCount: 3, random: new FixedRandom(2, 0, 1));
+        TournamentEditor.DeletePairing(t, bye.Id, true);
+        Generate(t, all: true, source: StartingNumberSource.Random, random: new FixedRandom(2, 0, 1));
         Assert.Equal(3, t.NumberOfRounds);
         Assert.True(t.Stages[0].RandomStartingNumbers);
     }

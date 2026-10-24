@@ -33,7 +33,7 @@ export const saveStatus = {
 
 /** 409 answers that only ask the referee to confirm: nothing was attempted, so they are not save failures. */
 const CONFIRMATION_REQUESTS = new Set([
-  'clear.confirm', 'generate.roundCountAdjustment', 'generate.replaceUnplayed', 'pairing.resultWouldBeDiscarded',
+  'clear.confirm', 'generate.replaceUnplayed', 'pairing.resultWouldBeDiscarded',
   'stage.unplayedPairingsWillBeDeleted',
 ]);
 
@@ -99,8 +99,8 @@ export const api = {
   preparation: (id: string) => request<Preparation>('GET', `${t(id)}/standings/preparation`),
   changeSystem: (id: string, startRound: number, system: TournamentSystem, confirmDeleteUnplayed = false) =>
     request<TournamentView>('POST', `${t(id)}/stages`, { startRound, system, confirmDeleteUnplayed }),
-  generate: (id: string, round: number, options: { allRounds: boolean; source: StartingNumberSource; confirmReplace?: boolean; roundCount?: number | null }) =>
-    request<TournamentView>('POST', `${t(id)}/rounds/${round}/generate`, { confirmReplace: false, roundCount: null, ...options }),
+  generate: (id: string, round: number, options: { allRounds: boolean; source: StartingNumberSource; confirmReplace?: boolean }) =>
+    request<TournamentView>('POST', `${t(id)}/rounds/${round}/generate`, { confirmReplace: false, ...options }),
   clearRoundRobin: (id: string, round: number, confirm: boolean) =>
     request<TournamentView>('POST', `${t(id)}/rounds/${round}/clear-round-robin`, { confirm }),
   saveStartingNumbers: (id: string, entries: { participantId: number; number: number | null }[]) =>

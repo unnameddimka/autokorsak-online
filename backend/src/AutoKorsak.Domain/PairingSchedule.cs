@@ -108,8 +108,7 @@ public static class PairingSchedule
     }
 
     public static GenerationResult GenerateRoundRobin(
-        Tournament t, int round, bool allRounds, StartingNumberSource source, int? confirmedRoundCount, bool confirmReplace,
-        IRandomSource random)
+        Tournament t, int round, bool allRounds, StartingNumberSource source, bool confirmReplace, IRandomSource random)
     {
         t.EnsureStages();
         if (round < 1 || round > t.NumberOfRounds)
@@ -128,16 +127,14 @@ public static class PairingSchedule
         var players = roster.Count;
         var cycle = players % 2 == 0 ? players - 1 : players;
 
-        // 2. Stage length: a terminal stage must be exactly one cycle; the referee may confirm a round-count change.
+        // 2. Stage length: a terminal stage must be exactly one cycle. Spec 0003 §2.2: the count follows the roster
+        // without a confirmation (this replaces the 0002 prompt); an unsafe resize still fails atomically.
         var roundCount = t.NumberOfRounds;
         if (!t.HasLaterStage(stage))
         {
             var required = start - 1 + cycle;
             if (t.NumberOfRounds != required)
             {
-                if (confirmedRoundCount != required)
-                    throw DomainException.Conflict("generate.roundCountAdjustment",
-                        Args(("players", players), ("required", required), ("current", t.NumberOfRounds)));
                 ValidateRoundCountChange(t, required);
                 roundCount = required;
             }
@@ -161,7 +158,7 @@ public static class PairingSchedule
             foreach (var id in roster)
             {
                 var p = t.FindParticipant(id) ?? throw new DomainException("generate.rosterInvalid");
-                if (p.Preliminary || !p.PlaysInRound(number))
+                if (p.Preliminary || !t.Plays(p, number))
                     throw new DomainException("generate.playerUnavailable", Args(("name", p.DisplayName), ("round", number)));
             }
             plans.Add(PlanRound(t, number, fixture));
@@ -254,8 +251,8 @@ public static class PairingSchedule
     }
 
     /// <summary>Eligible for the RR numbered roster: finalized and taking part from the stage start (spec 0002 §2.1).</summary>
-    public static bool IsRoundRobinEligible(Participant p, PairingStage stage) =>
-        !p.Preliminary && p.FirstEligibleRound <= stage.StartRound;
+    public static bool IsRoundRobinEligible(Tournament t, Participant p, PairingStage stage) =>
+        !p.Preliminary && t.EffectiveJoinRound(p) <= stage.StartRound;
 
     /// <summary>Read model for the UI: numbers (frozen or draft), eligibility and the result lock.</summary>
     public static RoundRobinState? DescribeRoundRobin(Tournament t)
@@ -269,7 +266,7 @@ public static class PairingSchedule
             // Frozen numbers for roster members; others keep showing their retained (inactive) draft.
             for (var i = 0; i < roster.Count; i++) numbers[roster[i]] = i + 1;
         }
-        var eligible = t.Participants.Where(p => stage.FrozenRosterIds?.Contains(p.Id) ?? IsRoundRobinEligible(p, stage))
+        var eligible = t.Participants.Where(p => stage.FrozenRosterIds?.Contains(p.Id) ?? IsRoundRobinEligible(t, p, stage))
             .Select(p => p.Id).ToList();
         var locked = EnteredResults(t, stage);
         return new RoundRobinState(stage.StartRound, t.StageEnd(stage), stage.IsFrozen, stage.RandomStartingNumbers,
@@ -296,11 +293,13 @@ public static class PairingSchedule
         var blocked = new SortedSet<int>();
         foreach (var r in t.Rounds.Where(r => r.Number > target && r.Pairings.Count > 0)) blocked.Add(r.Number);
         foreach (var s in t.Stages.Where(s => s.StartRound > target)) blocked.Add(s.StartRound);
-        foreach (var p in t.Participants)
-        {
-            if (p.FirstEligibleRound > target) blocked.Add(p.FirstEligibleRound);
-            foreach (var r in p.NotPlayingRounds.Where(r => r > target)) blocked.Add(r);
-        }
+        // A pure round robin ignores the hidden joining rounds and absences (spec 0003 §2.3); they are kept as stored.
+        if (!t.IsPureRoundRobin())
+            foreach (var p in t.Participants)
+            {
+                if (p.FirstEligibleRound > target) blocked.Add(p.FirstEligibleRound);
+                foreach (var r in p.NotPlayingRounds.Where(r => r > target)) blocked.Add(r);
+            }
         if (blocked.Count > 0)
             throw DomainException.Conflict("generate.roundCountShrinkBlocked", Args(("required", target), ("rounds", RoundList(blocked))));
     }
@@ -320,13 +319,13 @@ public static class PairingSchedule
     {
         var end = t.StageEnd(stage);
         var pending = t.Participants
-            .Where(p => !p.Preliminary && p.FirstEligibleRound > stage.StartRound && p.FirstEligibleRound <= end)
+            .Where(p => !p.Preliminary && t.EffectiveJoinRound(p) > stage.StartRound && t.EffectiveJoinRound(p) <= end)
             .Select(p => p.DisplayName).ToList();
         if (pending.Count > 0)
             throw new DomainException("generate.participantJoinsMidRoundRobin",
                 Args(("names", string.Join(", ", pending)), ("start", stage.StartRound)));
 
-        var eligible = t.Participants.Where(p => IsRoundRobinEligible(p, stage)).OrderBy(p => p.Id).ToList();
+        var eligible = t.Participants.Where(p => IsRoundRobinEligible(t, p, stage)).OrderBy(p => p.Id).ToList();
         if (source == StartingNumberSource.Random)
         {
             var roster = eligible.Select(p => p.Id).ToList();

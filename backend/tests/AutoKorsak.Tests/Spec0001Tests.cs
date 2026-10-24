@@ -22,7 +22,8 @@ public class Spec0001Tests
     private static Tournament RoundRobin(int players, int? rounds = null)
     {
         var cycle = players % 2 == 0 ? players - 1 : players;
-        var t = TournamentEditor.Create(Settings("RR", TournamentSystem.RoundRobin, rounds ?? cycle), DateTimeOffset.UnixEpoch);
+        var t = TournamentEditor.Create(Settings("RR", TournamentSystem.RoundRobin), DateTimeOffset.UnixEpoch);
+        t.NumberOfRounds = rounds ?? cycle; // spec 0003: Settings no longer edits an RR count; a stored (pre-0003) value
         for (var i = 1; i <= players; i++) TournamentEditor.AddParticipant(t, Player($"P{i}", rating: 2000 - i * 10));
         NumberByRegistration(t, 1); // spec 0002: explicit starting numbers (registration order, as 0001 seeded)
         return t;
@@ -33,17 +34,17 @@ public class Spec0001Tests
     /// explicit manual numbering (1..N in ID order) before a non-random draw.
     /// </summary>
     private static GenerationResult Generate(Tournament t, int round, bool all = false, bool random = false, bool confirm = false,
-        IRandomSource? source = null, int? roundCount = null)
+        IRandomSource? source = null)
     {
         return PairingSchedule.GenerateRoundRobin(t, round, all,
-            random ? StartingNumberSource.Random : StartingNumberSource.Entered, roundCount, confirm, source ?? Ordered);
+            random ? StartingNumberSource.Random : StartingNumberSource.Entered, confirm, source ?? Ordered);
     }
 
     internal static void NumberByRegistration(Tournament t, int round)
     {
         var stage = t.StageFor(round);
         if (!stage.IsRoundRobin || stage.IsFrozen) return;
-        var eligible = t.Participants.Where(p => PairingSchedule.IsRoundRobinEligible(p, stage)).OrderBy(p => p.Id).ToList();
+        var eligible = t.Participants.Where(p => PairingSchedule.IsRoundRobinEligible(t, p, stage)).OrderBy(p => p.Id).ToList();
         for (var i = 0; i < eligible.Count; i++) eligible[i].StartingNumber = i + 1;
     }
 
@@ -182,12 +183,10 @@ public class Spec0001Tests
     [Fact]
     public void Terminal_round_robin_stage_needs_exactly_one_cycle_checked_at_generation()
     {
-        var t = RoundRobin(4, rounds: 5); // settings save is fine during registration
-        var prompt = Assert.Throws<DomainException>(() => Generate(t, 1)); // spec 0002 §4 replaced the 0001 mismatch error
-        Assert.Equal("generate.roundCountAdjustment", prompt.Code);
-        Assert.Equal(3, prompt.Args["required"]);
-        Assert.Null(t.Stages[0].FrozenRosterIds);
-        Assert.Equal(5, t.NumberOfRounds);
+        var t = RoundRobin(4, rounds: 5); // a stale stored count is fine during registration
+        Generate(t, 1); // spec 0003 §2.2 replaced the 0002 prompt (which replaced the 0001 error): the count follows
+        Assert.Equal(3, t.NumberOfRounds);
+        Assert.NotNull(t.Stages[0].FrozenRosterIds);
 
         var prefix = RoundRobin(4, rounds: 7);
         PairingSchedule.ChangeSystem(prefix, 4, TournamentSystem.Swiss, false);
@@ -404,19 +403,20 @@ public class Spec0001Tests
     public void Round_robin_entry_is_only_at_the_stage_start_before_the_draw_and_never_after()
     {
         var t = RoundRobin(4);
-        Assert.Equal("participant.joinMidRoundRobin",
-            Assert.Throws<DomainException>(() => TournamentEditor.AddParticipant(t, Player("Mid") with { FirstEligibleRound = 2 })).Code);
+        // Spec 0003 §2.3: a pure round robin ignores a requested joining round (was participant.joinMidRoundRobin).
+        var mid = TournamentEditor.AddParticipant(t, Player("Mid", preliminary: true) with { FirstEligibleRound = 2 });
+        Assert.Equal(1, mid.FirstEligibleRound);
+        TournamentEditor.DeleteParticipant(t, mid.Id);
         t.CurrentRound = 2;
         Assert.Equal(1, TournamentEditor.AddParticipant(t, Player("P5")).FirstEligibleRound); // pre-draw default normalized to start
         TournamentEditor.UpdateSettings(t, Settings("RR", TournamentSystem.RoundRobin, 5));
         NumberByRegistration(t, 1);
 
         var pending = t.Participants.Single(p => p.DisplayName == "P5");
-        pending.FirstEligibleRound = 3; // inconsistent registration (e.g. older data)
-        Assert.Equal("generate.participantJoinsMidRoundRobin", Assert.Throws<DomainException>(() => Generate(t, 1)).Code);
-        pending.FirstEligibleRound = 1;
+        pending.FirstEligibleRound = 3; // inconsistent registration (e.g. older data): spec 0003 no longer blocks the draw
 
         Generate(t, 1);
+        Assert.Contains(pending.Id, t.Stages[0].FrozenRosterIds!);
         Assert.Equal("participant.noStageAfterRoundRobin",
             Assert.Throws<DomainException>(() => TournamentEditor.AddParticipant(t, Player("After freeze"))).Code);
         var roundOne = t.Rounds[0].Pairings.Single(p => p.Involves(pending.Id));
@@ -609,11 +609,8 @@ public class Spec0001Tests
         var member = t.FindParticipant(2)!;
         var before = Json(t);
 
-        var ex = Assert.Throws<DomainException>(() =>
-            TournamentEditor.UpdateParticipant(t, member.Id, Player("P2", rating: member.Rating) with { NotPlayingRounds = [2] }));
-
-        Assert.Equal("participant.rosterMemberUnavailable", ex.Code);
-        Assert.True(ex.IsConflict);
+        // Spec 0003 §2.3: in a pure round robin the hidden availability input is ignored (was a 409); nothing changes.
+        TournamentEditor.UpdateParticipant(t, member.Id, Player("P2", rating: member.Rating) with { NotPlayingRounds = [2] });
         Assert.Equal(before, Json(t));
         Generate(t, 1, all: true); // the schedule stays generatable
         Assert.Equal(3, t.Rounds.Count(r => r.Pairings.Count == 2));

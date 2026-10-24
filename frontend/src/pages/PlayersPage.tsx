@@ -3,7 +3,7 @@ import { api } from '../api/client';
 import type { FinalizeResult, Participant, UpsertDecision, UpsertOutcome, UpsertPlan } from '../api/types';
 import { Modal, Notice, useConfirm, useToast } from '../components/common';
 import { useI18n } from '../i18n';
-import { errorMessage, formatRank, roman, roundParticipation } from '../format';
+import { errorMessage, formatRank, isPureRoundRobin, roman, roundParticipation } from '../format';
 import { useTournament } from './TournamentLayout';
 import { PlayerEditor } from './PlayerEditor';
 
@@ -16,6 +16,8 @@ export function PlayersPage() {
   const [upsertOpen, setUpsertOpen] = useState(false);
   const preliminaryCount = tournament.participants.filter((p) => p.preliminary).length;
   const players = [...tournament.participants].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  // Spec 0003 §2.3: joining rounds and per-round availability mean nothing in a pure round robin.
+  const showParticipation = !isPureRoundRobin(tournament);
 
   async function finalizeAll() {
     const ok = await confirm({
@@ -84,8 +86,8 @@ export function PlayersPage() {
               <th>{t('field.team')}</th>
               <th>{t('field.coach')}</th>
               <th>{t('players.registration')}</th>
-              <th>{t('players.joinsShort')}</th>
-              <th>{t('field.availability')}</th>
+              {showParticipation && <th>{t('players.joinsShort')}</th>}
+              {showParticipation && <th>{t('field.availability')}</th>}
               <th className="num">{t('players.games')}</th>
               <th>{t('field.comment')}</th>
             </tr>
@@ -100,7 +102,7 @@ export function PlayersPage() {
                 </td>
                 <td lang="en">{[p.surname, p.firstName].filter(Boolean).join(' ')}</td>
                 <td>{p.rank && formatRank(p.rank, t)}</td>
-                <td className="num">{p.rating || ''}</td>
+                <td className="num">{p.rating}</td>
                 <td>{p.country}</td>
                 <td>{p.club}</td>
                 <td>{p.team}</td>
@@ -108,8 +110,8 @@ export function PlayersPage() {
                 <td>{p.preliminary
                   ? <span className="badge badge-warning">{t('player.registrationPreliminary')}</span>
                   : <span className="badge badge-ok">{t('player.registrationFinal')}</span>}</td>
-                <td>{roman(p.firstEligibleRound)}</td>
-                <td className="availability">
+                {showParticipation && <td>{roman(p.firstEligibleRound)}</td>}
+                {showParticipation && <td className="availability">
                   {Array.from({ length: tournament.numberOfRounds }, (_, i) => i + 1).map((r) => {
                     const state = roundParticipation(p, r);
                     const label = state === 'plays' ? t('player.plays') : state === 'notJoined' ? t('player.notJoinedYet') : t('player.notPlayingShort');
@@ -119,7 +121,7 @@ export function PlayersPage() {
                       </span>
                     );
                   })}
-                </td>
+                </td>}
                 <td className="num">{view.gameCounts[String(p.id)] ?? 0}</td>
                 <td className="comment-cell">{p.comment}</td>
               </tr>
@@ -205,7 +207,7 @@ function CatalogUpsertDialog({ onClose }: { onClose: () => void }) {
                       <label key={c.id} className="checkbox">
                         <input type="radio" name={name} checked={current?.decision === 'link' && current.catalogEntryId === c.id}
                           onChange={() => decide(item.participantId, 'link', c.id)} />
-                        <span>{t('catalog.linkTo', { name: c.displayName, details: [c.rank && formatRank(c.rank, t), c.rating || '', c.club].filter(Boolean).join(', ') })}</span>
+                        <span>{t('catalog.linkTo', { name: c.displayName, details: [c.rank && formatRank(c.rank, t), String(c.rating), c.club].filter(Boolean).join(', ') })}</span>
                       </label>
                     ))}
                     <label className="checkbox">
