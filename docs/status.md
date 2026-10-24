@@ -2,10 +2,10 @@
 
 **Current version:** spec 0003 (referee usability: automatic round-robin round count, pure round-robin participation,
 Standings-only round control, transliteration, rating input, app-only explanation, result-first pairing editor with
-the "both win" result), implemented 2026-10-24 in `f20db3f` on top of specs 0000–0002; review findings P1-01 and P2-01 fixed in `7c86d6f` and `3ff305d`, **awaiting GPT-6 re-review**. Spec 0000 was
+the "both win" result), implemented 2026-10-24 in `f20db3f` on top of specs 0000–0002; review findings P1-01 and P2-01 fixed in `7c86d6f` and `3ff305d`; **accepted on re-review at `7c86d6f`**. Spec 0000 was
 accepted after review (final version `8fd3898`), and so were spec 0001 (final version `b565ad20`) and spec 0002
-(final version `6821a5b6`, accepted in `ea951a2`). The live container on `:8080` was not redeployed; it still runs
-an earlier version until the owner asks to redeploy.
+(final version `6821a5b6`, accepted in `ea951a2`). On 2026-10-25 the live container on `:8080` was redeployed with this
+version at the owner's request, after a backup of its data volume (see *Deployment log*).
 
 ## What works
 
@@ -215,11 +215,19 @@ assistant wizard, authentication, other board games, SORP result points.
 
 ## Next actions
 
-1. GPT-6 re-review of the spec 0003 corrections (`7c86d6f`).
-2. Redeploy the live container when the owner asks (it does not include 0002 or 0003 yet).
+1. Small follow-up (outside 0003, noted in the re-review): a Settings reduction of the round count for a non-round-robin
+   tournament should not drop rounds that hold retained legacy XML. Also update the "Before you commit" guidance in
+   `CLAUDE.md` to smoke on a disposable instance instead of redeploying `:8080`.
+2. Referee demonstration of the spec 0002/0003 workflows on the live instance; collect feedback for the next spec.
 3. Referee demo of the round-robin numbering, reset and stage-change flows. Collect answers to the open questions in
    `docs/decisions.md` (Kind codes, rating → rank, skipped-round scoring).
 4. Next specs (likely candidates: automatic Swiss/McMahon pairing, skipped-round scoring).
+
+## Deployment log
+
+| Date | Version | Notes |
+|---|---|---|
+| 2026-10-25 | `fe328ea` (spec 0003 accepted; runtime code as at `7c86d6f`) | Owner-approved redeploy of `:8080` (`docker compose up --build -d`). Before it, the container was stopped and the `autokorsak-online_autokorsak-data` volume archived outside the repository (3 tournaments, 0 catalog entries, schema `user_version` 1); the previous image is tagged `autokorsak-online:pre-0003-rollback`. After it, all three stored tournaments loaded unchanged with no migration (same `updatedAt`; a drawn round robin with a frozen roster of 5 and 6 results kept its count and result lock), standings and export reports answered, and a read-only browser check in uk and en showed no errors and sent no write requests. |
 
 ## Review log
 
@@ -231,4 +239,5 @@ assistant wizard, authentication, other board games, SORP result points.
 | 2026-10-16 | GPT-6 (re-review) | `87bf7a04` | All five previous findings closed. 2× P2: the pairing editor could not delete a credited bye (missing confirmation flag); stored pre-0001 tournaments could lose the Settings lock after deleting their last pairing. | Both fixed with regression tests; see [review/0001-rereview-gpt6-87bf7a04-response.md](review/0001-rereview-gpt6-87bf7a04-response.md). Accepted (final review `bf8d235`). |
 | 2026-10-16 | GPT-6 | `4ecfd464` (spec 0002) | 1× P1 (the player card rejected every non-empty starting number, including unchanged frozen ones, because of a broken digit check), 2× P2 (a typed 0 silently cleared a draft; Clear could discard unsaved table edits). | All three fixed with regression tests; see [review/0002-review-gpt6-4ecfd464-response.md](review/0002-review-gpt6-4ecfd464-response.md). |
 | 2026-10-16 | GPT-6 (re-review) | `6821a5b6` (spec 0002) | All three findings closed; no new blocking issue. | Accepted; see [review/0002-rereview-gpt6-6821a5b6.md](review/0002-rereview-gpt6-6821a5b6.md). |
-| 2026-10-24 | GPT-6 | `f20db3f` (spec 0003) | 1× P1 (an automatic shrink dropped rounds holding only retained legacy XML), 1× P2 (drawing all rounds of a pure round robin failed with `round.outOfRange` when the current round was valid only under the provisional count). Architecture accepted. | Fixed in `7c86d6f` (P1-01) and `3ff305d` (P2-01) with regression tests; see [review/0003-review-gpt6-f20db3f-response.md](review/0003-review-gpt6-f20db3f-response.md). Awaiting re-review. |
+| 2026-10-24 | GPT-6 | `f20db3f` (spec 0003) | 1× P1 (an automatic shrink dropped rounds holding only retained legacy XML), 1× P2 (drawing all rounds of a pure round robin failed with `round.outOfRange` when the current round was valid only under the provisional count). Architecture accepted. | Fixed in `7c86d6f` (P1-01) and `3ff305d` (P2-01) with regression tests; see [review/0003-review-gpt6-f20db3f-response.md](review/0003-review-gpt6-f20db3f-response.md). |
+| 2026-10-24 | GPT-6 (re-review) | `7c86d6f` (spec 0003) | Both findings closed; no new blocking defect. Future-platform docs confirmed non-executable. | Accepted; see [review/0003-rereview-gpt6-7c86d6f.md](review/0003-rereview-gpt6-7c86d6f.md). |
