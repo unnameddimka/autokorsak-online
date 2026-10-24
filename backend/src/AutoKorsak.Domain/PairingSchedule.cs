@@ -294,7 +294,8 @@ public static class PairingSchedule
             throw new DomainException("generate.roundCountOutOfRange", Args(("required", target), ("max", TournamentEditor.MaxRounds)));
         if (target >= t.NumberOfRounds) return;
         var blocked = new SortedSet<int>();
-        foreach (var r in t.Rounds.Where(r => r.Number > target && r.Pairings.Count > 0)) blocked.Add(r.Number);
+        // A round holding pairings or retained legacy XML is never dropped (review P1-01 of 0003); empty ones may go.
+        foreach (var r in t.Rounds.Where(r => r.Number > target && (r.Pairings.Count > 0 || r.LegacyXml is not null))) blocked.Add(r.Number);
         foreach (var s in t.Stages.Where(s => s.StartRound > target)) blocked.Add(s.StartRound);
         // A pure round robin ignores the hidden joining rounds and absences (spec 0003 §2.3); they are kept as stored.
         if (!t.IsPureRoundRobin())

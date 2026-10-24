@@ -537,7 +537,7 @@ export const en = {
   'clear.done': 'Round-robin draw cleared ({count} pairings deleted)',
   'clear.settingsUnlocked': 'The tournament has no pairings left, so the tournament system can be changed again in the settings.',
   'error.generate.lockedByResults': 'Round-robin generation is locked: {count} games already have results ({games}, round/board). Remove every entered result first.',
-  'error.generate.roundCountShrinkBlocked': 'The number of rounds cannot be reduced to {required}: rounds {rounds} still hold pairings, a stage start, a joining round or availability marks. Resolve them first.',
+  'error.generate.roundCountShrinkBlocked': 'The number of rounds cannot be reduced to {required}: rounds {rounds} still hold pairings, data kept from the imported XML file, a stage start, a joining round or availability marks. Nothing was changed. Delete the pairings in those rounds; rounds with data from the imported file are never removed automatically.',
   'error.generate.roundCountOutOfRange': 'A full round robin would need {required} rounds; the maximum is {max}.',
   'error.generate.startingNumbersInvalid': 'The entered starting numbers must be exactly 1–{max}, each used once. Nothing was changed.',
   'error.clear.lockedByResults': 'The round-robin draw cannot be cleared: {count} games already have results ({games}, round/board). Results are never deleted by clearing.',

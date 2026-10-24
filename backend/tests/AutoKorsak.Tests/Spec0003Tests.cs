@@ -145,6 +145,53 @@ public class Spec0003Tests
         Assert.Equal(before, Json(t));
     }
 
+    // Review P1-01 of f20db3f: a round with retained legacy XML but no pairings is never dropped by the resize.
+    [Fact]
+    public void A_metadata_only_round_beyond_the_derived_count_blocks_the_shrink_without_changes()
+    {
+        var t = RoundRobin(3);
+        t.NumberOfRounds = 6;
+        t.Rounds.Add(new Round { Number = 5, LegacyXml = "<TournamentRound><RoundNumber>5</RoundNumber><Extra>kept</Extra></TournamentRound>" });
+        var before = Json(t);
+        var ex = Assert.Throws<DomainException>(() => Draw(t));
+        Assert.Equal("generate.roundCountShrinkBlocked", ex.Code);
+        Assert.True(ex.IsConflict);
+        Assert.Equal("5", ex.Args["rounds"]);
+        Assert.Equal(before, Json(t));
+    }
+
+    [Fact]
+    public void An_empty_round_without_metadata_still_shrinks_automatically()
+    {
+        var t = RoundRobin(3);
+        t.NumberOfRounds = 6;
+        t.Rounds.Add(new Round { Number = 6 }); // e.g. left behind by deleting its only pairing
+        Draw(t);
+        Assert.Equal(3, t.NumberOfRounds);
+        Assert.DoesNotContain(t.Rounds, r => r.Number > 3);
+    }
+
+    [Fact]
+    public void Imported_round_xml_blocks_the_shrink_after_switching_an_undrawn_import_to_round_robin()
+    {
+        // A legacy file whose round elements hold no pairings imports without the Settings lock; its rounds keep their
+        // original elements (LegacyXml). Built from the reference fixture with every <Pairing> element removed.
+        var xml = System.Text.RegularExpressions.Regex.Replace(
+            Encoding.UTF8.GetString(Fixtures.Read(Fixtures.ReferenceRelativePath)), @"<Pairing[\s>][\s\S]*?</Pairing>", "");
+        var t = LegacyXmlImporter.Import(Encoding.UTF8.GetBytes(xml), DateTimeOffset.UnixEpoch);
+        Assert.Empty(t.AllPairings());
+        Assert.False(TournamentEditor.IsSystemLocked(t));
+        TournamentEditor.UpdateSettings(t, Settings(t.Name, TournamentSystem.RoundRobin));
+        Assert.True(t.IsPureRoundRobin());
+        foreach (var p in t.Participants.Skip(4)) p.Preliminary = true; // 4 final players: 3 rounds instead of 6
+        Assert.All(t.Rounds, r => Assert.NotNull(r.LegacyXml));
+        var before = Json(t);
+        var ex = Assert.Throws<DomainException>(() => PairingSchedule.GenerateRoundRobin(t, 1, true, StartingNumberSource.Random, false, new FixedRandom(0)));
+        Assert.Equal("generate.roundCountShrinkBlocked", ex.Code);
+        Assert.Equal("4, 5, 6", ex.Args["rounds"]);
+        Assert.Equal(before, Json(t));
+    }
+
     // 6. A frozen roster is stable; Clear releases it and the next draw recalculates.
     [Fact]
     public void Frozen_roster_and_count_stay_until_clear_and_the_next_draw_recalculates()
