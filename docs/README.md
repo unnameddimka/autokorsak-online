@@ -22,6 +22,15 @@
 
 New scope and changed requirements go into new numbered specs (`0001-…`). Approved specs are never rewritten.
 
+## Future design notes (not authorized for implementation)
+
+These are exploratory design records, **not approved development specifications**. Agents must not implement
+them unless the owner later approves a separately scoped numbered spec and instructs implementation.
+
+- [future/platform-architecture.md](future/platform-architecture.md): long-term dual-mode referee deployment,
+  central data platform, external go sources, player identity matching, privacy/consent, moderation, and
+  tournament publishing. **Status: Future Design — Not Authorized for Implementation.**
+
 ## Static reference evidence (do not modify)
 
 - [reference/legacy-ui/](reference/legacy-ui/README.md): 15 screenshots of AutoKorsak 1.38. They are functional
